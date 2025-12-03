@@ -3,11 +3,12 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
+    command: sh -c "npm install && PORT=${PORT:-3000} npm run dev -- --hostname 0.0.0.0 --port ${PORT:-3000}"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:${BACKEND_PORT:-5000}}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:5001}
+      PORT: ${FRONTEND_PORT:-3000}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-13000}:${FRONTEND_PORT:-3000}"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -23,7 +24,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-86400}
     ports:
-      - "${BACKEND_PORT:-5000}:5000"
+      - "${BACKEND_PORT:-5001}:5000"
     volumes:
       - ./backend:/app
     depends_on:
