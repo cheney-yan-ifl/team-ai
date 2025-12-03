@@ -4,6 +4,11 @@ node_modules
 .turbo
 dist
 out
+.dist
+
+# Coverage and test output
+coverage
+.nyc_output
 
 # Env and local config
 .env
@@ -16,6 +21,19 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Editor
+.vscode
+.history
+.idea
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv
+
+# Build artifacts
+build
 
 # Coverage and test output
 coverage
