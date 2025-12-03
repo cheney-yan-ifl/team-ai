@@ -23,5 +23,6 @@ coverage
 
 # Editor
 .vscode
+.history
 .idea
 .history
