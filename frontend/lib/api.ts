@@ -1,5 +1,5 @@
 // Simple API client for backend communication
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5001';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:19001';
 
 export interface HealthStatus {
   status: string;
@@ -39,7 +39,12 @@ export async function checkHealth(): Promise<HealthStatus> {
 }
 
 // Send a message to the backend
-export async function sendMessage(sessionId: string, text: string, author: string = 'user'): Promise<MessageResponse> {
+export async function sendMessage(
+  sessionId: string,
+  text: string,
+  author: string = 'user',
+  messageId?: string
+): Promise<MessageResponse> {
   try {
     const response = await fetch(`${API_BASE}/api/message`, {
       method: 'POST',
@@ -50,6 +55,7 @@ export async function sendMessage(sessionId: string, text: string, author: strin
         sessionId,
         text,
         author,
+        messageId,
       }),
     });
     

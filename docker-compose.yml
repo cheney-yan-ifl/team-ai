@@ -3,12 +3,16 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    command: sh -c "npm install && PORT=${PORT:-3000} npm run dev -- --hostname 0.0.0.0 --port ${PORT:-3000}"
+    command: sh -c "npm install && PORT=${PORT:-19000} npm run dev -- --hostname 0.0.0.0 --port ${PORT:-19000}"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:5001}
-      PORT: ${FRONTEND_PORT:-3000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:19001}
+      PORT: ${FRONTEND_PORT:-19000}
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "${FRONTEND_PORT:-13000}:${FRONTEND_PORT:-3000}"
+      - "${FRONTEND_PORT:-19000}:${FRONTEND_PORT:-19000}"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -18,32 +22,36 @@ services:
 
   backend:
     build: ./backend
-    command: flask --app app run --host=0.0.0.0 --port=5000 --debug
+    command: flask --app app run --host=0.0.0.0 --port=19001 --debug
     environment:
+      FLASK_ENV: development
       FLASK_DEBUG: "1"
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PYTHONUNBUFFERED: "1"
+      REDIS_URL: ${REDIS_URL:-redis://redis:19002/0}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-86400}
+      PORT: ${BACKEND_PORT:-19001}
     ports:
-      - "${BACKEND_PORT:-5001}:5000"
+      - "${BACKEND_PORT:-19001}:${BACKEND_PORT:-19001}"
     volumes:
       - ./backend:/app
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:19001/api/health')"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--port", "19002"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-19002}:${REDIS_PORT:-19002}"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-p", "19002", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5

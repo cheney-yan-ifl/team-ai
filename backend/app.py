@@ -14,7 +14,7 @@ from flask_cors import CORS
 
 @dataclass
 class Settings:
-    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:19002/0")
     session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
     session_recent_limit: int = int(os.getenv("SESSION_RECENT_LIMIT", "50"))
     stream_group: str = os.getenv("STREAM_GROUP", "worker-group")
@@ -469,4 +469,4 @@ worker_thread = start_worker_thread()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=19001, debug=True)

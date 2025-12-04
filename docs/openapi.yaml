@@ -1,0 +1,131 @@
+openapi: 3.0.3
+info:
+  title: Team AI Backend API
+  version: "0.1.0"
+  description: >
+    Backend API for the AI Team Workspace. Provides health checks, message ingestion,
+    and Server-Sent Events (SSE) streaming for live updates.
+servers:
+  - url: http://127.0.0.1:19001
+    description: Local development
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service is reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/message:
+    post:
+      summary: Send a message to a session
+      description: >
+        Accepts a user message, appends it to Redis, publishes `message:ack`,
+        enqueues processing for worker fanout, and streams agent responses via SSE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+      responses:
+        '200':
+          description: Message accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Redis unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/stream:
+    get:
+      summary: Subscribe to session events (SSE)
+      description: >
+        Streams live events for a given session via Server-Sent Events.
+        Expected event types include `message:ack`, `message:delta`, `message:done`,
+        `state:update`, and `message:error`.
+      parameters:
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+          required: true
+          description: Session identifier to scope the SSE feed.
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                connected:
+                  summary: Initial connection
+                  value: |
+                    data: {"type":"state:update","status":"connected"}
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        redis:
+          type: string
+          example: up
+        primaryModel:
+          type: string
+          example: mock-primary
+        observerModel:
+          type: string
+          example: mock-observer
+    MessageRequest:
+      type: object
+      required:
+        - sessionId
+        - text
+      properties:
+        sessionId:
+          type: string
+          example: session_123
+        text:
+          type: string
+          example: "Hello team, what's our status?"
+        author:
+          type: string
+          default: user
+        messageId:
+          type: string
+          description: Optional client-provided ID; server will generate if omitted.
+    MessageResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        messageId:
+          type: string
+          example: 0c7a6b76-2c7c-4f4f-9c67-821f4c1f9c77
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: sessionId and text are required
+        message:
+          type: string
