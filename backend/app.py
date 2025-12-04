@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 import uuid
@@ -300,35 +301,19 @@ class PrimaryLLM:
                 app.logger.warning("Failed to init OpenAI client, will fallback to requests/mock: %s", exc)
                 self.client = None
 
-    def _build_input(self, prompt: str, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Build Responses-style input with system + persona + mapped history + latest user prompt."""
+    def _build_messages(self, prompt: str, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Build chat-completions style messages with system + persona + mapped history + latest user prompt."""
         messages: List[Dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": self.settings.primary_system_prompt}],
-            },
-            {
-                "role": "developer",
-                "content": [{"type": "text", "text": self.settings.primary_persona}],
-            },
+            {"role": "system", "content": self.settings.primary_system_prompt},
+            {"role": "system", "content": self.settings.primary_persona},
         ]
         for msg in history:
             text = msg.get("text") or ""
             role = msg.get("role") or "user"
             api_role = "assistant" if role == "agent" else "user"
-            messages.append(
-                {
-                    "role": api_role,
-                    "content": [{"type": "text", "text": text}],
-                }
-            )
+            messages.append({"role": api_role, "content": text})
         if not history or history[-1].get("text") != prompt:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": prompt}],
-                }
-            )
+            messages.append({"role": "user", "content": prompt})
         return messages
 
     def _complete(self, prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
@@ -337,17 +322,15 @@ class PrimaryLLM:
         api_url = self.settings.primary_api_url
         if not api_key or not api_url or not model:
             return None
-        messages = self._build_input(prompt, history)
+        messages = self._build_messages(prompt, history)
+
         app.logger.info("PrimaryLLM request: url=%s model=%s", api_url, model)
         app.logger.debug("PrimaryLLM input preview: %s", messages)
         try:
             if self.client:
                 resp = self.client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {"role": m["role"], "content": "".join([c["text"] for c in m.get("content", [])])}
-                        for m in messages
-                    ],
+                    messages=messages,
                     temperature=0.6,
                     max_tokens=400,
                     stream=False,
@@ -357,8 +340,15 @@ class PrimaryLLM:
                     return resp.choices[0].message.content
             return None
         except Exception as exc:
-            # degrade to mock on any API failure
-            app.logger.warning("Primary API call failed, using mock. Error: %s", exc)
+            # degrade to mock on any API failure, with response details if available
+            extra = ""
+            try:
+                resp_obj = getattr(exc, "response", None)
+                if resp_obj is not None:
+                    extra = f" status={getattr(resp_obj, 'status_code', '?')} body={getattr(resp_obj, 'text', '')}"
+            except Exception:
+                extra = ""
+            app.logger.warning("Primary API call failed, using mock. Error: %s%s", exc, f" {extra}".rstrip())
             return None
 
     def stream_response(self, prompt: str, history: Optional[List[Dict[str, Any]]] = None) -> Iterable[str]:
@@ -366,17 +356,14 @@ class PrimaryLLM:
         model = self.settings.primary_model
         api_key = self.settings.primary_api_key
         api_url = self.settings.primary_api_url
-        messages = self._build_input(prompt, history)
+        messages = self._build_messages(prompt, history)
         if not api_key or not api_url or not model or not self.client:
             yield from self.mock_llm.stream_response(prompt, history)
             return
         try:
             stream = self.client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": m["role"], "content": "".join([c["text"] for c in m.get("content", [])])}
-                    for m in messages
-                ],
+                messages=messages,
                 temperature=0.6,
                 max_tokens=400,
                 stream=True,
@@ -384,11 +371,18 @@ class PrimaryLLM:
             for chunk in stream:
                 if not chunk.choices:
                     continue
-                delta = chunk.choices[0].delta.get("content") if chunk.choices[0].delta else None
+                delta = getattr(chunk.choices[0].delta, "content", None)
                 if delta:
                     yield delta
         except Exception as exc:
-            app.logger.warning("Primary streaming failed, using mock. Error: %s", exc)
+            extra = ""
+            try:
+                resp_obj = getattr(exc, "response", None)
+                if resp_obj is not None:
+                    extra = f" status={getattr(resp_obj, 'status_code', '?')} body={getattr(resp_obj, 'text', '')}"
+            except Exception:
+                extra = ""
+            app.logger.warning("Primary streaming failed, using mock. Error: %s%s", exc, f" {extra}".rstrip())
             yield from self.mock_llm.stream_response(prompt, history)
 
     def summarize(self, history: List[Dict[str, Any]]) -> str:
@@ -544,6 +538,7 @@ worker = EventWorker(store, llm)
 
 app = Flask(__name__)
 CORS(app)
+app.logger.setLevel(logging.DEBUG)
 
 
 @app.route("/api/health", methods=["GET"])
