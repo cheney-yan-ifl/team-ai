@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { checkHealth, sendMessage, generateSessionId, HealthStatus, fetchAgents, AgentConfig } from '../lib/api';
 import { SSEProvider, useSSE } from '../lib/sse';
 
@@ -20,6 +20,23 @@ type AgentState = {
   model?: string;
 };
 
+type ColorPalette = {
+  background: string;
+  surface: string;
+  border: string;
+  text: string;
+  muted: string;
+  badgeBg: string;
+  badgeBorder: string;
+  primary: string;
+  success: string;
+  bubbleUser: string;
+  bubbleAgent: string;
+  bubbleUserBorder: string;
+  bubbleAgentBorder: string;
+  inputBg: string;
+};
+
 export default function HomePage() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [sessionId, setSessionId] = useState<string>('');
@@ -35,7 +52,7 @@ export default function HomePage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef<boolean>(true);
 
-  const focusComposer = () => {
+  const focusComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     const len = el.value.length;
@@ -45,9 +62,9 @@ export default function HomePage() {
     } catch {
       // ignore selection issues on some browsers
     }
-  };
+  }, []);
 
-  const colors = theme === 'dark'
+  const colors: ColorPalette = theme === 'dark'
     ? {
         background: '#0f1115',
         surface: '#161a1f',
@@ -162,134 +179,221 @@ export default function HomePage() {
     return colors.muted;
   };
 
-  const PageLayout = () => {
-    const { status: sseStatus, error: sseError, lastEvent } = useSSE();
+  return (
+    <SSEProvider sessionId={sessionId}>
+      <PageLayout
+        theme={theme}
+        setTheme={setTheme}
+        colors={colors}
+        sessionId={sessionId}
+        health={health}
+        messages={messages}
+        setMessages={setMessages}
+        messageText={messageText}
+        setMessageText={setMessageText}
+        sending={sending}
+        handleSubmit={handleSubmit}
+        handleKeyDown={handleKeyDown}
+        pendingMessageIds={pendingMessageIds}
+        sentMessageIds={sentMessageIds}
+        setPendingMessageIds={setPendingMessageIds}
+        setSentMessageIds={setSentMessageIds}
+        textareaRef={textareaRef}
+        messagesContainerRef={messagesContainerRef}
+        focusComposer={focusComposer}
+        agents={agents}
+        agentStates={agentStates}
+        setAgentStates={setAgentStates}
+        isAtBottomRef={isAtBottomRef}
+        getHealthStatus={getHealthStatus}
+        getHealthColor={getHealthColor}
+      />
+    </SSEProvider>
+  );
+}
 
-    useEffect(() => {
-      if (!lastEvent?.data) return;
-      console.log('SSE event:', lastEvent.data);
-      let payload: any;
-      try {
-        payload = JSON.parse(lastEvent.data);
-      } catch {
-        return;
-      }
+type PageLayoutProps = {
+  theme: 'light' | 'dark';
+  setTheme: React.Dispatch<React.SetStateAction<'light' | 'dark'>>;
+  colors: ColorPalette;
+  sessionId: string;
+  health: HealthStatus | null;
+  messages: ChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  messageText: string;
+  setMessageText: React.Dispatch<React.SetStateAction<string>>;
+  sending: boolean;
+  handleSubmit: (event: React.FormEvent) => Promise<void>;
+  handleKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => Promise<void>;
+  pendingMessageIds: Set<string>;
+  sentMessageIds: Set<string>;
+  setPendingMessageIds: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setSentMessageIds: React.Dispatch<React.SetStateAction<Set<string>>>;
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  messagesContainerRef: React.RefObject<HTMLDivElement>;
+  focusComposer: () => void;
+  agents: AgentConfig[];
+  agentStates: Record<string, AgentState>;
+  setAgentStates: React.Dispatch<React.SetStateAction<Record<string, AgentState>>>;
+  isAtBottomRef: React.MutableRefObject<boolean>;
+  getHealthStatus: () => string;
+  getHealthColor: () => string;
+};
 
-      const type = payload.type as string | undefined;
-      const messageId = (payload.messageId || payload.message_id) as string | undefined;
-      const authorRaw = payload.author as string | undefined;
-      const agentName = payload.agentName as string | undefined;
-      const authorLabel = agentName || authorRaw || 'Agent';
-      const now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
+function PageLayout({
+  theme,
+  setTheme,
+  colors,
+  sessionId,
+  health,
+  messages,
+  setMessages,
+  messageText,
+  setMessageText,
+  sending,
+  handleSubmit,
+  handleKeyDown,
+  pendingMessageIds,
+  sentMessageIds,
+  setPendingMessageIds,
+  setSentMessageIds,
+  textareaRef,
+  messagesContainerRef,
+  focusComposer,
+  agents,
+  agentStates,
+  setAgentStates,
+  isAtBottomRef,
+  getHealthStatus,
+  getHealthColor,
+}: PageLayoutProps) {
+  const { status: sseStatus, error: sseError, lastEvent } = useSSE();
 
-      if (!type) return;
+  useEffect(() => {
+    if (!lastEvent?.data) return;
+    console.log('SSE event:', lastEvent.data);
+    let payload: any;
+    try {
+      payload = JSON.parse(lastEvent.data);
+    } catch {
+      return;
+    }
 
-      if (type === 'message:ack' && messageId) {
+    const type = payload.type as string | undefined;
+    const messageId = (payload.messageId || payload.message_id) as string | undefined;
+    const authorRaw = payload.author as string | undefined;
+    const agentName = payload.agentName as string | undefined;
+    const authorLabel = agentName || authorRaw || 'Agent';
+    const now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
+
+    if (!type) return;
+
+    if (type === 'message:ack' && messageId) {
+      setPendingMessageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(messageId);
+        return next;
+      });
+      setSentMessageIds((prev) => {
+        const next = new Set(prev);
+        next.add(messageId);
+        return next;
+      });
+
+      setMessages((prev) => {
+        const exists = prev.find((m) => m.id === messageId);
+        const nextMessage: ChatMessage = {
+          id: messageId,
+          author: authorRaw || 'You',
+          text: payload.text || '',
+          timestamp: now,
+          type: (authorRaw && authorRaw.startsWith('agent:')) ? 'agent' : 'user',
+        };
+        if (exists) {
+          return prev.map((m) => (m.id === messageId ? { ...m, ...nextMessage } : m));
+        }
+        return [...prev, nextMessage];
+      });
+      return;
+    }
+
+    if (type === 'message:delta' || type === 'message:done') {
+      const id = messageId || payload.inReplyTo || payload.in_reply_to || Date.now().toString();
+      if (type === 'message:done') {
         setPendingMessageIds((prev) => {
           const next = new Set(prev);
-          next.delete(messageId);
+          next.delete(id);
           return next;
         });
         setSentMessageIds((prev) => {
           const next = new Set(prev);
-          next.add(messageId);
+          next.add(id);
           return next;
         });
-
-        setMessages((prev) => {
-          const exists = prev.find((m) => m.id === messageId);
-          const nextMessage: ChatMessage = {
-            id: messageId,
-            author: authorRaw || 'You',
-            text: payload.text || '',
-            timestamp: now,
-            type: (authorRaw && authorRaw.startsWith('agent:')) ? 'agent' : 'user',
-          };
-          if (exists) {
-            return prev.map((m) => (m.id === messageId ? { ...m, ...nextMessage } : m));
-          }
-          return [...prev, nextMessage];
-        });
-        return;
       }
 
-      if (type === 'message:delta' || type === 'message:done') {
-        const id = messageId || payload.inReplyTo || payload.in_reply_to || Date.now().toString();
-        if (type === 'message:done') {
-          setPendingMessageIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          setSentMessageIds((prev) => {
-            const next = new Set(prev);
-            next.add(id);
-            return next;
-          });
+      setMessages((prev) => {
+        const existing = prev.find((m) => m.id === id);
+        const base: ChatMessage = existing || {
+          id: id,
+          author: authorLabel,
+          text: '',
+          timestamp: now,
+          type: 'agent',
+        };
+        const updated: ChatMessage = {
+          ...base,
+          author: authorLabel,
+          text: type === 'message:delta'
+            ? `${base.text || ''}${payload.delta || ''}`
+            : (payload.text || base.text || ''),
+          timestamp: base.timestamp || now,
+          type: 'agent',
+        };
+        if (existing) {
+          return prev.map((m) => (m.id === id ? updated : m));
         }
+        return [...prev, updated];
+      });
+      return;
+    }
+  }, [lastEvent, setMessages, setPendingMessageIds, setSentMessageIds]);
 
-        setMessages((prev) => {
-          const existing = prev.find((m) => m.id === id);
-          const base: ChatMessage = existing || {
-            id: id,
-            author: authorLabel,
-            text: '',
-            timestamp: now,
-            type: 'agent',
-          };
-          const updated: ChatMessage = {
-            ...base,
-            author: authorLabel,
-            text: type === 'message:delta'
-              ? `${base.text || ''}${payload.delta || ''}`
-              : (payload.text || base.text || ''),
-            timestamp: base.timestamp || now,
-            type: 'agent',
-          };
-          if (existing) {
-            return prev.map((m) => (m.id === id ? updated : m));
-          }
-          return [...prev, updated];
-        });
-        return;
-      }
-    }, [lastEvent]);
+  useEffect(() => {
+    if (textareaRef.current && document.activeElement !== textareaRef.current) {
+      focusComposer();
+    }
+  }, [messages.length, lastEvent, focusComposer, textareaRef]);
 
-    useEffect(() => {
-      if (textareaRef.current && document.activeElement !== textareaRef.current) {
-        focusComposer();
-      }
-    }, [messages.length, lastEvent]);
+  useEffect(() => {
+    if (!lastEvent?.data) return;
+    try {
+      const payload = JSON.parse(lastEvent.data);
+      const type = payload.type as string;
+      const rawAgent = payload.agentId || (payload.author && typeof payload.author === 'string' && payload.author.startsWith('agent:') ? payload.author.split(':')[1] : undefined);
+      if (!rawAgent) return;
 
-    useEffect(() => {
-      if (!lastEvent?.data) return;
-      try {
-        const payload = JSON.parse(lastEvent.data);
-        const type = payload.type as string;
-        const rawAgent = payload.agentId || (payload.author && typeof payload.author === 'string' && payload.author.startsWith('agent:') ? payload.author.split(':')[1] : undefined);
-        if (!rawAgent) return;
+      const workingUpdate = type === 'message:delta' ? true : type === 'message:done' ? false : undefined;
+      const nextName = payload.agentName || rawAgent;
+      const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'Primary' : 'Agent');
+      setAgentStates((prev) => {
+        const existing = prev[rawAgent] || { name: rawAgent, role: 'Agent', working: false, flash: false };
+        return {
+          ...prev,
+          [rawAgent]: {
+            ...existing,
+            name: nextName || existing.name,
+            role: nextRole || existing.role,
+            working: workingUpdate !== undefined ? workingUpdate : existing.working,
+            flash: true,
+          },
+        };
+      });
 
-        const workingUpdate = type === 'message:delta' ? true : type === 'message:done' ? false : undefined;
-        const nextName = payload.agentName || rawAgent;
-        const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'Primary' : 'Agent');
+      const timer = setTimeout(() => {
         setAgentStates((prev) => {
-          const existing = prev[rawAgent] || { name: rawAgent, role: 'Agent', working: false, flash: false };
-          return {
-            ...prev,
-            [rawAgent]: {
-              ...existing,
-              name: nextName || existing.name,
-              role: nextRole || existing.role,
-              working: workingUpdate !== undefined ? workingUpdate : existing.working,
-              flash: true,
-            },
-          };
-        });
-
-        const timer = setTimeout(() => {
-          setAgentStates((prev) => {
-            const existing = prev[rawAgent];
-            if (!existing) return prev;
+          const existing = prev[rawAgent];
+          if (!existing) return prev;
           return {
             ...prev,
             [rawAgent]: { ...existing, flash: false },
@@ -301,23 +405,24 @@ export default function HomePage() {
     } catch {
       // ignore malformed SSE payloads
     }
-    }, [lastEvent]);
+  }, [lastEvent, setAgentStates]);
 
-    useEffect(() => {
-      const el = messagesContainerRef.current;
-      if (!el) return;
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      isAtBottomRef.current = nearBottom;
-    }, [messages.length]);
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    isAtBottomRef.current = nearBottom;
+  }, [messages.length, messagesContainerRef, isAtBottomRef]);
 
-    useEffect(() => {
-      const el = messagesContainerRef.current;
-      if (!el) return;
-      if (isAtBottomRef.current) {
-        el.scrollTop = el.scrollHeight;
-      }
-    }, [messages.length]);
-    return (
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    if (isAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages.length, messagesContainerRef, isAtBottomRef]);
+
+  return (
     <main style={{
       height: '100%',
       width: '100%',
@@ -753,7 +858,7 @@ export default function HomePage() {
               color: colors.text
             }}>Timeline</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {messages.slice(-3).map((msg, i) => (
+              {messages.slice(-3).map((msg) => (
                 <li key={msg.id} style={{ padding: '4px 0', fontSize: '12px', color: colors.text }}>
                   {msg.timestamp} {msg.author.split(' ')[0]}
                 </li>
@@ -763,12 +868,5 @@ export default function HomePage() {
         </aside>
       </div>
     </main>
-    );
-  };
-
-  return (
-    <SSEProvider sessionId={sessionId}>
-      <PageLayout />
-    </SSEProvider>
   );
 }

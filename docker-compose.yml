@@ -71,6 +71,7 @@ services:
   datadog-agent:
     env_file:
       - .env
+    image: datadog/agent:latest
     environment:
       DD_APM_ENABLED: "true"
       DD_LOGS_ENABLED: "true"

@@ -61,8 +61,10 @@ def test_worker_processes_message_and_updates_state(test_ctx):
     assert resp.status_code == 200
 
     events = []
+    saw_done = False
+    saw_complete_state = False
     deadline = time.time() + 2
-    while time.time() < deadline:
+    while time.time() < deadline and not (saw_done and saw_complete_state):
         test_ctx["worker"].process_once()
         message = pubsub.get_message(timeout=0.05)
         if not message:
@@ -72,10 +74,16 @@ def test_worker_processes_message_and_updates_state(test_ctx):
         payload = json.loads(message["data"])
         events.append(payload)
         if payload["type"] == "message:done":
-            break
+            saw_done = True
+        if payload.get("state") == "response_complete":
+            saw_complete_state = True
 
     assert any(evt["type"] == "message:delta" for evt in events)
     assert any(evt["type"] == "message:done" for evt in events)
+    assert any(evt.get("state") == "calling_api" for evt in events)
+    assert any(evt.get("state") == "thinking" for evt in events)
+    assert any(evt.get("state") == "responding" for evt in events)
+    assert any(evt.get("state") == "response_complete" for evt in events)
 
     summary = test_ctx["redis"].hgetall(app_module.session_summary_key(session_id))
     assert "text" in summary and summary["text"]

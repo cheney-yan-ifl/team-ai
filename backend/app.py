@@ -469,6 +469,9 @@ class EventWorker:
         author = fields.get("author", "user")
         text = fields.get("text", "")
 
+        primary_agent_id = self.store.settings.primary_agent_id
+        primary_agent_name = self.store.settings.primary_agent_name
+
         with self.store.session_lock(session_id) as locked:
             if not locked:
                 self.store.publish_event(
@@ -487,10 +490,49 @@ class EventWorker:
                     "messageId": message_id,
                 },
             )
+            self.store.publish_event(
+                session_id,
+                {
+                    "type": "state:update",
+                    "sessionId": session_id,
+                    "state": "calling_api",
+                    "messageId": agent_message_id,
+                    "inReplyTo": message_id,
+                    "agentId": primary_agent_id,
+                    "agentName": primary_agent_name,
+                },
+            )
 
             history = self.store.recent_messages(session_id)
+            self.store.publish_event(
+                session_id,
+                {
+                    "type": "state:update",
+                    "sessionId": session_id,
+                    "state": "thinking",
+                    "messageId": agent_message_id,
+                    "inReplyTo": message_id,
+                    "agentId": primary_agent_id,
+                    "agentName": primary_agent_name,
+                },
+            )
             full_text = ""
+            first_delta_sent = False
             for idx, delta in enumerate(self.llm.stream_response(text, history=history)):
+                if not first_delta_sent:
+                    first_delta_sent = True
+                    self.store.publish_event(
+                        session_id,
+                        {
+                            "type": "state:update",
+                            "sessionId": session_id,
+                            "state": "responding",
+                            "messageId": agent_message_id,
+                            "inReplyTo": message_id,
+                            "agentId": primary_agent_id,
+                            "agentName": primary_agent_name,
+                        },
+                    )
                 full_text += delta
                 self.store.publish_event(
                     session_id,
@@ -498,9 +540,9 @@ class EventWorker:
                         "type": "message:delta",
                         "messageId": agent_message_id,
                         "sessionId": session_id,
-                        "author": f"agent:{self.store.settings.primary_agent_id}",
-                        "agentId": self.store.settings.primary_agent_id,
-                        "agentName": self.store.settings.primary_agent_name,
+                        "author": f"agent:{primary_agent_id}",
+                        "agentId": primary_agent_id,
+                        "agentName": primary_agent_name,
                         "delta": delta,
                         "index": idx,
                     },
@@ -510,13 +552,25 @@ class EventWorker:
                 "type": "message:done",
                 "messageId": agent_message_id,
                 "sessionId": session_id,
-                "author": f"agent:{self.store.settings.primary_agent_id}",
-                "agentId": self.store.settings.primary_agent_id,
-                "agentName": self.store.settings.primary_agent_name,
+                "author": f"agent:{primary_agent_id}",
+                "agentId": primary_agent_id,
+                "agentName": primary_agent_name,
                 "text": full_text.strip(),
                 "inReplyTo": message_id,
             }
             self.store.publish_event(session_id, done_payload)
+            self.store.publish_event(
+                session_id,
+                {
+                    "type": "state:update",
+                    "sessionId": session_id,
+                    "state": "response_complete",
+                    "messageId": agent_message_id,
+                    "inReplyTo": message_id,
+                    "agentId": primary_agent_id,
+                    "agentName": primary_agent_name,
+                },
+            )
 
             agent_message = {
                 "messageId": agent_message_id,
