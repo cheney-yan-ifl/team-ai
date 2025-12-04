@@ -474,7 +474,9 @@ export default function HomePage() {
           backgroundColor: colors.surface,
           minHeight: 0,
           overflow: 'hidden',
-          flex: '1 1 0'
+          flex: '1 1 0',
+          width: '100%',
+          boxSizing: 'border-box'
         }}>
           <div style={{
             padding: '20px',
@@ -557,74 +559,78 @@ export default function HomePage() {
           </div>
 
           <form onSubmit={handleSubmit} style={{
-            padding: '20px',
+            padding: '12px 16px',
             borderTop: `1px solid ${colors.border}`,
             backgroundColor: colors.surface,
             position: 'sticky',
             bottom: 0,
             left: 0,
             width: '100%',
+            maxWidth: '100%',
             boxSizing: 'border-box'
           }}>
-            <div style={{ marginBottom: '12px' }}>
-              <textarea
-                ref={textareaRef}
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Message the team... (backend connected)"
-                rows={3}
-                disabled={sending}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  resize: 'vertical',
-                  fontFamily: 'inherit',
-                  backgroundColor: colors.inputBg,
-                  color: colors.text
-                }}
-              />
-            </div>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: colors.muted }}>
-                  Session: {sessionId ? sessionId.slice(-12) : 'loading...'}
-                </span>
-                <span style={{ fontSize: '12px', color: colors.muted }}>
-                  {pendingMessageIds.size > 0 ? `Sending ${pendingMessageIds.size}...` : sentMessageIds.size > 0 ? 'Sent' : 'Idle'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button type="button" style={{
-                  padding: '8px 16px',
-                  border: `1px solid ${colors.border}`,
-                  backgroundColor: 'transparent',
-                  borderRadius: '6px',
-                  cursor: 'pointer'
-                }}>
-                  Clear
-                </button>
-                <button
-                  type="submit"
-                  disabled={!messageText.trim() || sending}
+            <div style={{ maxWidth: '1100px', margin: '0 auto', width: '100%' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <textarea
+                  ref={textareaRef}
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Message the team... (backend connected)"
+                  rows={3}
+                  disabled={sending}
                   style={{
-                    padding: '8px 16px',
-                    backgroundColor: (!messageText.trim() || sending) ? colors.muted : colors.primary,
-                    color: '#ffffff',
-                    border: 'none',
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${colors.border}`,
                     borderRadius: '6px',
-                    cursor: (!messageText.trim() || sending) ? 'not-allowed' : 'pointer'
+                    fontSize: '14px',
+                    resize: 'vertical',
+                    fontFamily: 'inherit',
+                    backgroundColor: colors.inputBg,
+                    color: colors.text,
+                    boxSizing: 'border-box'
                   }}
-                >
-                  {sending ? 'Sending...' : 'Send'}
-                </button>
+                />
+              </div>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: colors.muted }}>
+                    Session: {sessionId ? sessionId.slice(-12) : 'loading...'}
+                  </span>
+                  <span style={{ fontSize: '12px', color: colors.muted }}>
+                    {pendingMessageIds.size > 0 ? `Sending ${pendingMessageIds.size}...` : sentMessageIds.size > 0 ? 'Sent' : 'Idle'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button type="button" style={{
+                    padding: '8px 16px',
+                    border: `1px solid ${colors.border}`,
+                    backgroundColor: 'transparent',
+                    borderRadius: '6px',
+                    cursor: 'pointer'
+                  }}>
+                    Clear
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!messageText.trim() || sending}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: (!messageText.trim() || sending) ? colors.muted : colors.primary,
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: (!messageText.trim() || sending) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {sending ? 'Sending...' : 'Send'}
+                  </button>
+                </div>
               </div>
             </div>
           </form>

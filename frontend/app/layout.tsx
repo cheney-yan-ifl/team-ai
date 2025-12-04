@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AI Team Workspace",
@@ -12,13 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body style={{
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        margin: 0,
-        padding: '20px',
-        backgroundColor: '#f5f5f5',
-        lineHeight: '1.6'
-      }}>
+      <body style={{ fontFamily: '-apple-system, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif', margin: 0 }}>
         {children}
       </body>
     </html>
