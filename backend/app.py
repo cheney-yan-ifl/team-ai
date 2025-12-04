@@ -8,8 +8,34 @@ from typing import Any, Dict, Iterable, List, Optional
 import threading
 
 import redis
+import requests
+from openai import OpenAI
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
+
+
+@dataclass
+class AgentConfig:
+    agent_id: str
+    name: str
+    role: str  # primary|observer|assistant
+    model: str
+    api_url: str
+    api_key: str
+    system_prompt: str = ""
+    persona: str = ""
+
+    def public(self) -> Dict[str, Any]:
+        """Return a sanitized dict suitable for UI consumption."""
+        return {
+            "agentId": self.agent_id,
+            "name": self.name,
+            "role": self.role,
+            "model": self.model,
+            "apiUrl": self.api_url,
+            "systemPrompt": self.system_prompt,
+            "persona": self.persona,
+        }
 
 
 @dataclass
@@ -22,8 +48,78 @@ class Settings:
     worker_idle_sleep: float = float(os.getenv("WORKER_IDLE_SLEEP", "0.05"))
     primary_agent_id: str = os.getenv("PRIMARY_AGENT_ID", "primary")
     primary_agent_name: str = os.getenv("PRIMARY_AGENT_NAME", "Nova")
-    primary_model: str = os.getenv("PRIMARY_MODEL", "mock-primary")
-    observer_model: str = os.getenv("OBSERVER_MODEL", "mock-observer")
+    primary_model: str = os.getenv("PRIMARY_MODEL", "gpt-4o-mini")
+    observer1_id: str = os.getenv("OBSERVER1_ID", "scout")
+    observer1_name: str = os.getenv("OBSERVER1_NAME", "Scout")
+    observer1_model: str = os.getenv("OBSERVER1_MODEL", "gpt-4o-mini-research")
+    observer2_id: str = os.getenv("OBSERVER2_ID", "sage")
+    observer2_name: str = os.getenv("OBSERVER2_NAME", "Sage")
+    observer2_model: str = os.getenv("OBSERVER2_MODEL", "gpt-4o-mini-critic")
+
+    primary_api_url: str = os.getenv("PRIMARY_API_URL", "https://api.openai.com/v1/chat/completions")
+    primary_api_key: str = os.getenv("PRIMARY_API_KEY", "")
+    primary_system_prompt: str = os.getenv(
+        "PRIMARY_SYSTEM_PROMPT",
+        "You are Nova, the primary agent. Be concise, calm, and synthesize inputs from observers.",
+    )
+    primary_persona: str = os.getenv("PRIMARY_PERSONA", "Primary orchestrator with balanced tone.")
+
+    observer1_api_url: str = os.getenv("OBSERVER1_API_URL", "https://api.openai.com/v1/chat/completions")
+    observer1_api_key: str = os.getenv("OBSERVER1_API_KEY", "")
+    observer1_system_prompt: str = os.getenv(
+        "OBSERVER1_SYSTEM_PROMPT",
+        "You are Scout, a research-focused observer. Provide sources, examples, and quick facts.",
+    )
+    observer1_persona: str = os.getenv("OBSERVER1_PERSONA", "Curious researcher, crisp bullets.")
+
+    observer2_api_url: str = os.getenv("OBSERVER2_API_URL", "https://api.openai.com/v1/chat/completions")
+    observer2_api_key: str = os.getenv("OBSERVER2_API_KEY", "")
+    observer2_system_prompt: str = os.getenv(
+        "OBSERVER2_SYSTEM_PROMPT",
+        "You are Sage, a critical observer. Challenge assumptions and highlight risks briefly.",
+    )
+    observer2_persona: str = os.getenv("OBSERVER2_PERSONA", "Critical reviewer, terse and pointed.")
+
+    @property
+    def observer_model(self) -> str:
+        """Backward compatibility for older fields."""
+        return self.observer1_model
+
+    @property
+    def agents(self) -> list[AgentConfig]:
+        """Config list for future UI exposure and extensibility."""
+        return [
+            AgentConfig(
+                agent_id=self.primary_agent_id,
+                name=self.primary_agent_name,
+                role="primary",
+                model=self.primary_model,
+                api_url=self.primary_api_url,
+                api_key=self.primary_api_key,
+                system_prompt=self.primary_system_prompt,
+                persona=self.primary_persona,
+            ),
+            AgentConfig(
+                agent_id=self.observer1_id,
+                name=self.observer1_name,
+                role="observer",
+                model=self.observer1_model,
+                api_url=self.observer1_api_url,
+                api_key=self.observer1_api_key,
+                system_prompt=self.observer1_system_prompt,
+                persona=self.observer1_persona,
+            ),
+            AgentConfig(
+                agent_id=self.observer2_id,
+                name=self.observer2_name,
+                role="observer",
+                model=self.observer2_model,
+                api_url=self.observer2_api_url,
+                api_key=self.observer2_api_key,
+                system_prompt=self.observer2_system_prompt,
+                persona=self.observer2_persona,
+            ),
+        ]
 
 
 def connect_redis(url: str) -> Optional[redis.Redis]:
@@ -175,7 +271,7 @@ class MockLLM:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    def stream_response(self, prompt: str) -> Iterable[str]:
+    def stream_response(self, prompt: str, history: Optional[List[Dict[str, Any]]] = None) -> Iterable[str]:
         response = f"Primary [{self.settings.primary_model}] reply: {prompt}"
         for token in response.split():
             yield token + " "
@@ -188,6 +284,118 @@ class MockLLM:
 
     def extract_fact(self, text: str) -> str:
         return f"Fact: user asked '{text[:40]}'"
+
+
+class PrimaryLLM:
+    """OpenAI-compatible Responses API client; falls back to mock when unavailable."""
+
+    def __init__(self, settings: Settings, mock_llm: MockLLM):
+        self.settings = settings
+        self.mock_llm = mock_llm
+        self.client: Optional[OpenAI] = None
+        if settings.primary_api_key and settings.primary_api_url:
+            try:
+                self.client = OpenAI(api_key=settings.primary_api_key, base_url=settings.primary_api_url)
+            except Exception as exc:  # pragma: no cover - defensive
+                app.logger.warning("Failed to init OpenAI client, will fallback to requests/mock: %s", exc)
+                self.client = None
+
+    def _build_input(self, prompt: str, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Build Responses-style input with system + persona + mapped history + latest user prompt."""
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": self.settings.primary_system_prompt}],
+            },
+            {
+                "role": "developer",
+                "content": [{"type": "text", "text": self.settings.primary_persona}],
+            },
+        ]
+        for msg in history:
+            text = msg.get("text") or ""
+            role = msg.get("role") or "user"
+            api_role = "assistant" if role == "agent" else "user"
+            messages.append(
+                {
+                    "role": api_role,
+                    "content": [{"type": "text", "text": text}],
+                }
+            )
+        if not history or history[-1].get("text") != prompt:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}],
+                }
+            )
+        return messages
+
+    def _complete(self, prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
+        model = self.settings.primary_model
+        api_key = self.settings.primary_api_key
+        api_url = self.settings.primary_api_url
+        if not api_key or not api_url or not model:
+            return None
+        messages = self._build_input(prompt, history)
+        app.logger.info("PrimaryLLM request: url=%s model=%s", api_url, model)
+        app.logger.debug("PrimaryLLM input preview: %s", messages)
+        try:
+            if self.client:
+                resp = self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": m["role"], "content": "".join([c["text"] for c in m.get("content", [])])}
+                        for m in messages
+                    ],
+                    temperature=0.6,
+                    max_tokens=400,
+                    stream=False,
+                )
+                app.logger.debug("PrimaryLLM SDK response: %s", resp)
+                if resp.choices:
+                    return resp.choices[0].message.content
+            return None
+        except Exception as exc:
+            # degrade to mock on any API failure
+            app.logger.warning("Primary API call failed, using mock. Error: %s", exc)
+            return None
+
+    def stream_response(self, prompt: str, history: Optional[List[Dict[str, Any]]] = None) -> Iterable[str]:
+        history = history or []
+        model = self.settings.primary_model
+        api_key = self.settings.primary_api_key
+        api_url = self.settings.primary_api_url
+        messages = self._build_input(prompt, history)
+        if not api_key or not api_url or not model or not self.client:
+            yield from self.mock_llm.stream_response(prompt, history)
+            return
+        try:
+            stream = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": m["role"], "content": "".join([c["text"] for c in m.get("content", [])])}
+                    for m in messages
+                ],
+                temperature=0.6,
+                max_tokens=400,
+                stream=True,
+            )
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.get("content") if chunk.choices[0].delta else None
+                if delta:
+                    yield delta
+        except Exception as exc:
+            app.logger.warning("Primary streaming failed, using mock. Error: %s", exc)
+            yield from self.mock_llm.stream_response(prompt, history)
+
+    def summarize(self, history: List[Dict[str, Any]]) -> str:
+        return self.mock_llm.summarize(history)
+
+    def extract_fact(self, text: str) -> str:
+        return self.mock_llm.extract_fact(text)
 
 
 class EventWorker:
@@ -271,8 +479,9 @@ class EventWorker:
                 },
             )
 
+            history = self.store.recent_messages(session_id)
             full_text = ""
-            for idx, delta in enumerate(self.llm.stream_response(text)):
+            for idx, delta in enumerate(self.llm.stream_response(text, history=history)):
                 full_text += delta
                 self.store.publish_event(
                     session_id,
@@ -329,7 +538,8 @@ class EventWorker:
 settings = Settings()
 redis_client = connect_redis(settings.redis_url)
 store = SessionStore(redis_client, settings)
-llm = MockLLM(settings)
+mock_llm = MockLLM(settings)
+llm = PrimaryLLM(settings, mock_llm)
 worker = EventWorker(store, llm)
 
 app = Flask(__name__)
@@ -351,6 +561,13 @@ def health() -> Response:
         "observerModel": settings.observer_model,
     }
     return jsonify(status)
+
+
+@app.route("/api/agents", methods=["GET"])
+def agents() -> Response:
+    """Expose configured agents (sanitized) for the frontend UI."""
+    payload = [agent.public() for agent in settings.agents]
+    return jsonify({"agents": payload})
 
 
 @app.route("/api/message", methods=["POST"])

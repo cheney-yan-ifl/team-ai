@@ -19,6 +19,20 @@ export interface MessageResponse {
   messageId: string;
 }
 
+export interface AgentConfig {
+  agentId: string;
+  name: string;
+  role: string;
+  model: string;
+  apiUrl: string;
+  systemPrompt?: string;
+  persona?: string;
+}
+
+export interface AgentsResponse {
+  agents: AgentConfig[];
+}
+
 // Generate a simple session ID
 export function generateSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -67,5 +81,20 @@ export async function sendMessage(
   } catch (error) {
     console.error('Send message failed:', error);
     return { ok: false, messageId: '' };
+  }
+}
+
+// Fetch configured agents from backend
+export async function fetchAgents(): Promise<AgentConfig[]> {
+  try {
+    const response = await fetch(`${API_BASE}/api/agents`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data: AgentsResponse = await response.json();
+    return data.agents || [];
+  } catch (error) {
+    console.error('Fetch agents failed:', error);
+    return [];
   }
 }

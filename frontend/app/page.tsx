@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { checkHealth, sendMessage, generateSessionId, HealthStatus } from '../lib/api';
+import { checkHealth, sendMessage, generateSessionId, HealthStatus, fetchAgents, AgentConfig } from '../lib/api';
 import { SSEProvider, useSSE } from '../lib/sse';
 
 interface ChatMessage {
@@ -17,6 +17,7 @@ type AgentState = {
   flash: boolean;
   name: string;
   role: string;
+  model?: string;
 };
 
 export default function HomePage() {
@@ -26,11 +27,8 @@ export default function HomePage() {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({
-    primary: { working: false, flash: false, name: 'Nova', role: 'Primary' },
-    observer1: { working: false, flash: false, name: 'Scout', role: 'Observer' },
-    observer2: { working: false, flash: false, name: 'Sage', role: 'Observer' },
-  });
+  const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [pendingMessageIds, setPendingMessageIds] = useState<Set<string>>(new Set());
   const [sentMessageIds, setSentMessageIds] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -93,11 +91,30 @@ export default function HomePage() {
       setHealth(healthStatus);
     }
     loadHealth();
+    fetchAgents().then(setAgents);
     
     // Check health every 30 seconds
     const interval = setInterval(loadHealth, 30000);
     return () => clearInterval(interval);
   }, []);
+  useEffect(() => {
+    if (!agents.length) return;
+    setAgentStates((prev) => {
+      const next: Record<string, AgentState> = {};
+      agents.forEach((agent) => {
+        const existing = prev[agent.agentId] || { working: false, flash: false, name: agent.name, role: agent.role };
+        next[agent.agentId] = {
+          ...existing,
+          name: agent.name,
+          role: agent.role === 'primary' ? 'Primary' : 'Observer',
+          model: agent.model,
+          flash: existing.flash,
+          working: existing.working,
+        };
+      });
+      return next;
+    });
+  }, [agents]);
 
   // Shared submit helper used by form submit and keyboard shortcut
   const submitMessage = async () => {
@@ -150,6 +167,7 @@ export default function HomePage() {
 
     useEffect(() => {
       if (!lastEvent?.data) return;
+      console.log('SSE event:', lastEvent.data);
       let payload: any;
       try {
         payload = JSON.parse(lastEvent.data);
@@ -253,7 +271,7 @@ export default function HomePage() {
 
         const workingUpdate = type === 'message:delta' ? true : type === 'message:done' ? false : undefined;
         const nextName = payload.agentName || rawAgent;
-        const nextRole = payload.role || (rawAgent === 'primary' ? 'Primary' : 'Agent');
+        const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'Primary' : 'Agent');
         setAgentStates((prev) => {
           const existing = prev[rawAgent] || { name: rawAgent, role: 'Agent', working: false, flash: false };
           return {
@@ -395,61 +413,32 @@ export default function HomePage() {
               color: colors.text
             }}>Agents</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              <li style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '8px',
-                borderRadius: '4px',
-                backgroundColor: colors.bubbleUser,
-                marginBottom: '4px'
-              }}>
-                <span style={{
-                  background: colors.primary,
-                  color: '#ffffff',
-                  padding: '2px 6px',
-                  borderRadius: '8px',
-                  fontSize: '10px',
-                  fontWeight: 'bold'
-                }}>Primary</span>
-                Nova (analysis)
-              </li>
-              <li style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '8px',
-                marginBottom: '4px',
-                color: colors.text
-              }}>
-                <span style={{
-                  background: colors.muted,
-                  color: '#ffffff',
-                  padding: '2px 6px',
-                  borderRadius: '8px',
-                  fontSize: '10px',
-                  fontWeight: 'bold'
-                }}>Observer</span>
-                Scout (research)
-              </li>
-              <li style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '8px',
-                marginBottom: '4px',
-                color: colors.text
-              }}>
-                <span style={{
-                  background: colors.muted,
-                  color: '#ffffff',
-                  padding: '2px 6px',
-                  borderRadius: '8px',
-                  fontSize: '10px',
-                  fontWeight: 'bold'
-                }}>Observer</span>
-                Sage (critic)
-              </li>
+              {agents.map((agent) => (
+                <li key={agent.agentId} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  backgroundColor: colors.surface,
+                  border: `1px solid ${colors.border}`,
+                  marginBottom: '8px',
+                  color: colors.text
+                }}>
+                  <span style={{
+                    background: agent.role === 'primary' ? colors.primary : colors.muted,
+                    color: '#ffffff',
+                    padding: '2px 6px',
+                    borderRadius: '8px',
+                    fontSize: '10px',
+                    fontWeight: 'bold'
+                  }}>{agent.role === 'primary' ? 'Primary' : 'Observer'}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span style={{ fontWeight: 'bold' }}>{agent.name}</span>
+                    <span style={{ fontSize: '12px', color: colors.muted }}>{agent.model}</span>
+                  </div>
+                </li>
+              ))}
             </ul>
           </div>
 
@@ -693,11 +682,12 @@ export default function HomePage() {
               color: colors.text
             }}>Agent Status</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {Object.entries(agentStates).map(([id, state]) => {
-                const initials = state.name ? state.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : id.slice(0, 2).toUpperCase();
+              {agents.map((agent) => {
+                const state = agentStates[agent.agentId] || { name: agent.name, role: agent.role, working: false, flash: false };
+                const initials = state.name ? state.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : agent.agentId.slice(0, 2).toUpperCase();
                 const flashShadow = state.flash ? `0 0 0 3px ${colors.primary}` : `0 0 0 1px ${colors.border}`;
                 return (
-                  <li key={id} style={{
+                  <li key={agent.agentId} style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px',
@@ -727,7 +717,7 @@ export default function HomePage() {
                         {state.working && <span role="img" aria-label="speaking">🗣️</span>}
                         <span style={{ fontWeight: 'bold' }}>{state.name}</span>
                       </div>
-                      <span style={{ fontSize: '12px', color: colors.muted }}>{state.role}</span>
+                      <span style={{ fontSize: '12px', color: colors.muted }}>{state.role === 'primary' ? 'Primary' : 'Observer'} · {agent.model}</span>
                     </div>
                   </li>
                 );
