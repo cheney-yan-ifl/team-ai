@@ -50,6 +50,8 @@ class Settings:
     primary_agent_id: str = os.getenv("PRIMARY_AGENT_ID", "primary")
     primary_agent_name: str = os.getenv("PRIMARY_AGENT_NAME", "Nova")
     primary_model: str = os.getenv("PRIMARY_MODEL", "gpt-4o-mini")
+    primary_max_tokens: int = int(os.getenv("PRIMARY_MAX_TOKENS", "1200"))
+    primary_reasoning_effort: str = os.getenv("PRIMARY_REASONING_EFFORT", "")
     observer1_id: str = os.getenv("OBSERVER1_ID", "scout")
     observer1_name: str = os.getenv("OBSERVER1_NAME", "Scout")
     observer1_model: str = os.getenv("OBSERVER1_MODEL", "gpt-4o-mini-research")
@@ -323,21 +325,31 @@ class PrimaryLLM:
         if not api_key or not api_url or not model:
             return None
         messages = self._build_messages(prompt, history)
+        request_args: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": self.settings.primary_max_tokens,
+            "stream": False,
+        }
 
         app.logger.info("PrimaryLLM request: url=%s model=%s", api_url, model)
         app.logger.debug("PrimaryLLM input preview: %s", messages)
         try:
             if self.client:
-                resp = self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.6,
-                    max_tokens=400,
-                    stream=False,
-                )
+                resp = self.client.chat.completions.create(**request_args)
                 app.logger.debug("PrimaryLLM SDK response: %s", resp)
                 if resp.choices:
-                    return resp.choices[0].message.content
+                    content = resp.choices[0].message.content or ""
+                    if content.strip():
+                        return content
+                    app.logger.warning(
+                        "PrimaryLLM returned empty content (finish_reason=%s); using mock fallback",
+                        getattr(resp.choices[0], "finish_reason", "?"),
+                    )
+                    return " ".join(self.mock_llm.stream_response(prompt, history))
+                app.logger.warning("PrimaryLLM returned no choices; using mock fallback")
+                return " ".join(self.mock_llm.stream_response(prompt, history))
             return None
         except Exception as exc:
             # degrade to mock on any API failure, with response details if available
@@ -360,14 +372,16 @@ class PrimaryLLM:
         if not api_key or not api_url or not model or not self.client:
             yield from self.mock_llm.stream_response(prompt, history)
             return
+        request_args: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": self.settings.primary_max_tokens,
+            "stream": True,
+        }
+        yielded_any = False
         try:
-            stream = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.6,
-                max_tokens=400,
-                stream=True,
-            )
+            stream = self.client.chat.completions.create(**request_args)
             for chunk in stream:
                 if not chunk.choices:
                     continue
@@ -379,7 +393,9 @@ class PrimaryLLM:
                     pieces = []
                     for part in delta_content:
                         if hasattr(part, "text"):
-                            pieces.append(part.text)
+                            text_obj = getattr(part, "text", "")
+                            text_value = getattr(text_obj, "value", None) or getattr(text_obj, "content", None) or text_obj
+                            pieces.append(str(text_value))
                         elif isinstance(part, dict) and "text" in part:
                             pieces.append(str(part["text"]))
                         elif isinstance(part, str):
@@ -388,7 +404,15 @@ class PrimaryLLM:
                 else:
                     delta = str(delta_content)
                 if delta:
+                    yielded_any = True
                     yield delta
+            if not yielded_any:
+                # If the stream produced nothing (or only empty parts), fall back to a non-streamed completion
+                fallback = self._complete(prompt, history)
+                if fallback:
+                    yield fallback
+                else:
+                    yield from self.mock_llm.stream_response(prompt, history)
         except Exception as exc:
             extra = ""
             try:
@@ -509,7 +533,7 @@ class EventWorker:
                 {
                     "type": "state:update",
                     "sessionId": session_id,
-                    "state": "thinking",
+                    "state": "responding",
                     "messageId": agent_message_id,
                     "inReplyTo": message_id,
                     "agentId": primary_agent_id,
@@ -521,18 +545,6 @@ class EventWorker:
             for idx, delta in enumerate(self.llm.stream_response(text, history=history)):
                 if not first_delta_sent:
                     first_delta_sent = True
-                    self.store.publish_event(
-                        session_id,
-                        {
-                            "type": "state:update",
-                            "sessionId": session_id,
-                            "state": "responding",
-                            "messageId": agent_message_id,
-                            "inReplyTo": message_id,
-                            "agentId": primary_agent_id,
-                            "agentName": primary_agent_name,
-                        },
-                    )
                 full_text += delta
                 self.store.publish_event(
                     session_id,

@@ -647,7 +647,16 @@ function PageLayout({
                   <span style={{ fontWeight: 'bold' }}>{message.author}</span>
                   <span>{message.timestamp}</span>
                 </div>
-                <p style={{ margin: 0, lineHeight: '1.5' }}>{message.text}</p>
+                <div
+                  style={{
+                    margin: 0,
+                    lineHeight: '1.5',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {message.text}
+                </div>
               </div>
             ))}
           </div>

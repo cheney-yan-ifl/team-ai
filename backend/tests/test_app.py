@@ -81,7 +81,6 @@ def test_worker_processes_message_and_updates_state(test_ctx):
     assert any(evt["type"] == "message:delta" for evt in events)
     assert any(evt["type"] == "message:done" for evt in events)
     assert any(evt.get("state") == "calling_api" for evt in events)
-    assert any(evt.get("state") == "thinking" for evt in events)
     assert any(evt.get("state") == "responding" for evt in events)
     assert any(evt.get("state") == "response_complete" for evt in events)
 
