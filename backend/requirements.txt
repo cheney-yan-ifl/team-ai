@@ -4,3 +4,4 @@ redis==5.0.3
 gunicorn==21.2.0
 requests==2.31.0
 openai>=1.35.0
+ddtrace>=2.8.0

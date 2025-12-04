@@ -371,7 +371,22 @@ class PrimaryLLM:
             for chunk in stream:
                 if not chunk.choices:
                     continue
-                delta = getattr(chunk.choices[0].delta, "content", None)
+                delta_content = getattr(chunk.choices[0].delta, "content", None)
+                if not delta_content:
+                    continue
+                # delta_content can be a list of parts or a string
+                if isinstance(delta_content, list):
+                    pieces = []
+                    for part in delta_content:
+                        if hasattr(part, "text"):
+                            pieces.append(part.text)
+                        elif isinstance(part, dict) and "text" in part:
+                            pieces.append(str(part["text"]))
+                        elif isinstance(part, str):
+                            pieces.append(part)
+                    delta = "".join(pieces)
+                else:
+                    delta = str(delta_content)
                 if delta:
                     yield delta
         except Exception as exc:

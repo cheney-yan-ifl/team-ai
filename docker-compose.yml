@@ -26,7 +26,16 @@ services:
     env_file:
       - .env
     build: ./backend
-    command: flask --app app run --host=0.0.0.0 --port=19001 --debug
+    command: >
+      sh -c '
+      if [ -n "$DD_API_KEY" ]; then
+        DD_LLMOBS_ENABLED=${DD_LLMOBS_ENABLED:-1}
+        DD_LLMOBS_ML_APP=${DD_LLMOBS_ML_APP:-quickstart-app}
+        ddtrace-run flask --app app run --host=0.0.0.0 --port=19001 --debug;
+      else
+        flask --app app run --host=0.0.0.0 --port=19001 --debug;
+      fi
+      '
     environment:
       FLASK_ENV: development
       FLASK_DEBUG: "1"
@@ -59,6 +68,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-
+  datadog-agent:
+    env_file:
+      - .env
+    environment:
+      DD_APM_ENABLED: "true"
+      DD_LOGS_ENABLED: "true"
 volumes:
   redis-data:
