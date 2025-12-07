@@ -33,9 +33,9 @@ export interface AgentsResponse {
   agents: AgentConfig[];
 }
 
-// Generate a simple session ID
+// Generate a short session ID (8 character alphanumeric)
 export function generateSessionId(): string {
-  return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return Math.random().toString(36).substring(2, 10);
 }
 
 // Check backend health

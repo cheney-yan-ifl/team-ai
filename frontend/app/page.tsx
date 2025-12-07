@@ -775,10 +775,10 @@ function PageLayout({
           }}>
             <div>
               <div style={{ 
-                fontSize: '12px', 
-                color: colors.muted, 
+                fontSize: '12px',
+                color: colors.muted,
                 marginBottom: '4px'
-              }}>Session: {sessionId.slice(-8)}</div>
+              }}>Session: {sessionId}</div>
               <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
                 {chatTitle}
               </div>
@@ -868,7 +868,7 @@ function PageLayout({
               }}>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <span style={{ fontSize: '12px', color: colors.muted }}>
-                    Session: {sessionId ? sessionId.slice(-12) : 'loading...'}
+                    Session: {sessionId || 'loading...'}
                   </span>
                   <span style={{ fontSize: '12px', color: colors.muted }}>
                     {pendingMessageIds.size > 0 ? `Sending ${pendingMessageIds.size}...` : sentMessageIds.size > 0 ? 'Sent' : 'Idle'}
@@ -986,7 +986,7 @@ function PageLayout({
             }}>Session Info</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               <li style={{ padding: '4px 0', color: colors.text }}>
-                ID: {sessionId.slice(-8)}
+                ID: {sessionId}
               </li>
               <li style={{ padding: '4px 0', color: colors.text }}>
                 Messages: {messages.length}
