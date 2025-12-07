@@ -83,6 +83,17 @@ class Settings:
     )
     observer2_persona: str = os.getenv("OBSERVER2_PERSONA", "Critical reviewer, terse and pointed.")
 
+    summarizer_id: str = os.getenv("SUMMARIZER_ID", "summarizer")
+    summarizer_name: str = os.getenv("SUMMARIZER_NAME", "Summarizer")
+    summarizer_model: str = os.getenv("SUMMARIZER_MODEL", "gpt-4o-mini")
+    summarizer_api_url: str = os.getenv("SUMMARIZER_API_URL", "https://api.openai.com/v1/chat/completions")
+    summarizer_api_key: str = os.getenv("SUMMARIZER_API_KEY", "")
+    summarizer_system_prompt: str = os.getenv(
+        "SUMMARIZER_SYSTEM_PROMPT",
+        "You are a summarizer agent. Generate concise summaries of conversations.",
+    )
+    summarizer_persona: str = os.getenv("SUMMARIZER_PERSONA", "Concise summarizer, factual and brief.")
+
     @property
     def observer_model(self) -> str:
         """Backward compatibility for older fields."""
@@ -121,6 +132,16 @@ class Settings:
                 api_key=self.observer2_api_key,
                 system_prompt=self.observer2_system_prompt,
                 persona=self.observer2_persona,
+            ),
+            AgentConfig(
+                agent_id=self.summarizer_id,
+                name=self.summarizer_name,
+                role="hidden_agent",
+                model=self.summarizer_model,
+                api_url=self.summarizer_api_url,
+                api_key=self.summarizer_api_key,
+                system_prompt=self.summarizer_system_prompt,
+                persona=self.summarizer_persona,
             ),
         ]
 

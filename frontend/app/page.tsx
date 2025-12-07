@@ -679,7 +679,7 @@ function PageLayout({
               color: colors.text
             }}>Agents</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {agents.map((agent) => (
+              {agents.filter(agent => agent.role !== 'hidden_agent').map((agent) => (
                 <li key={agent.agentId} style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -924,7 +924,7 @@ function PageLayout({
               color: colors.text
             }}>Participant Agents</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {agents.map((agent) => {
+              {agents.filter(agent => agent.role !== 'hidden_agent').map((agent) => {
                 const state = agentStates[agent.agentId] || { name: agent.name, role: agent.role, working: false, flash: false };
                 const initials = state.name ? state.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : agent.agentId.slice(0, 2).toUpperCase();
                 const flashShadow = state.flash ? `0 0 0 3px ${colors.primary}` : `0 0 0 1px ${colors.border}`;
