@@ -138,6 +138,10 @@ def session_stream_key(session_id: str) -> str:
     return f"session:{session_id}:events"
 
 
+def session_event_log_key(session_id: str) -> str:
+    return f"session:{session_id}:eventlog"
+
+
 def session_pubsub_channel(session_id: str) -> str:
     return f"session:{session_id}:fanout"
 
@@ -183,6 +187,7 @@ class SessionStore:
             session_summary_key(session_id),
             session_facts_key(session_id),
             session_stream_key(session_id),
+            session_event_log_key(session_id),
         ]:
             try:
                 self.redis.expire(key, ttl)
@@ -231,6 +236,12 @@ class SessionStore:
         self.redis.hset(key, mapping={"text": summary, "updated_at": time.time()})
         self.expire_session(session_id)
 
+    def summary_text(self, session_id: str) -> str:
+        if not self.redis:
+            return ""
+        key = session_summary_key(session_id)
+        return self.redis.hget(key, "text") or ""
+
     def add_fact(self, session_id: str, fact: str) -> None:
         if not self.redis:
             return
@@ -242,7 +253,22 @@ class SessionStore:
     def publish_event(self, session_id: str, payload: Dict[str, Any]) -> None:
         if not self.redis:
             return
-        self.redis.publish(session_pubsub_channel(session_id), json.dumps(payload))
+        encoded = json.dumps(payload)
+        try:
+            self.redis.publish(session_pubsub_channel(session_id), encoded)
+        finally:
+            # Also store in a per-session event log so reconnecting clients or debugging can replay.
+            try:
+                self.redis.xadd(
+                    session_event_log_key(session_id),
+                    {"data": encoded, "ts": time.time()},
+                    maxlen=1000,
+                    approximate=True,
+                )
+                self.expire_session(session_id)
+            except Exception:
+                # Logging should not block publish; swallow errors.
+                pass
 
     def recent_messages(self, session_id: str) -> List[Dict[str, Any]]:
         if not self.redis:
@@ -270,37 +296,17 @@ class SessionStore:
                 lock.release()
 
 
-class MockLLM:
+class PrimaryLLM:
+    """OpenAI-compatible API client with 200-token response limit."""
+
     def __init__(self, settings: Settings):
         self.settings = settings
-
-    def stream_response(self, prompt: str, history: Optional[List[Dict[str, Any]]] = None) -> Iterable[str]:
-        response = f"Primary [{self.settings.primary_model}] reply: {prompt}"
-        for token in response.split():
-            yield token + " "
-
-    def summarize(self, history: List[Dict[str, Any]]) -> str:
-        if not history:
-            return "No messages yet."
-        latest = history[-1].get("text", "")
-        return f"Session summary: last message noted '{latest[:60]}'"
-
-    def extract_fact(self, text: str) -> str:
-        return f"Fact: user asked '{text[:40]}'"
-
-
-class PrimaryLLM:
-    """OpenAI-compatible Responses API client; falls back to mock when unavailable."""
-
-    def __init__(self, settings: Settings, mock_llm: MockLLM):
-        self.settings = settings
-        self.mock_llm = mock_llm
         self.client: Optional[OpenAI] = None
         if settings.primary_api_key and settings.primary_api_url:
             try:
                 self.client = OpenAI(api_key=settings.primary_api_key, base_url=settings.primary_api_url)
             except Exception as exc:  # pragma: no cover - defensive
-                app.logger.warning("Failed to init OpenAI client, will fallback to requests/mock: %s", exc)
+                app.logger.warning("Failed to init OpenAI client: %s", exc)
                 self.client = None
 
     def _build_messages(self, prompt: str, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -318,101 +324,27 @@ class PrimaryLLM:
             messages.append({"role": "user", "content": prompt})
         return messages
 
-    def _complete(self, prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
-        model = self.settings.primary_model
-        api_key = self.settings.primary_api_key
-        api_url = self.settings.primary_api_url
-        if not api_key or not api_url or not model:
-            return None
-        messages = self._build_messages(prompt, history)
-        request_args: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": 0.6,
-            "max_tokens": self.settings.primary_max_tokens,
-            "stream": False,
-        }
-
-        app.logger.info("PrimaryLLM request: url=%s model=%s", api_url, model)
-        app.logger.debug("PrimaryLLM input preview: %s", messages)
-        try:
-            if self.client:
-                resp = self.client.chat.completions.create(**request_args)
-                app.logger.debug("PrimaryLLM SDK response: %s", resp)
-                if resp.choices:
-                    content = resp.choices[0].message.content or ""
-                    if content.strip():
-                        return content
-                    app.logger.warning(
-                        "PrimaryLLM returned empty content (finish_reason=%s); using mock fallback",
-                        getattr(resp.choices[0], "finish_reason", "?"),
-                    )
-                    return " ".join(self.mock_llm.stream_response(prompt, history))
-                app.logger.warning("PrimaryLLM returned no choices; using mock fallback")
-                return " ".join(self.mock_llm.stream_response(prompt, history))
-            return None
-        except Exception as exc:
-            # degrade to mock on any API failure, with response details if available
-            extra = ""
-            try:
-                resp_obj = getattr(exc, "response", None)
-                if resp_obj is not None:
-                    extra = f" status={getattr(resp_obj, 'status_code', '?')} body={getattr(resp_obj, 'text', '')}"
-            except Exception:
-                extra = ""
-            app.logger.warning("Primary API call failed, using mock. Error: %s%s", exc, f" {extra}".rstrip())
-            return None
-
-    def stream_response(self, prompt: str, history: Optional[List[Dict[str, Any]]] = None) -> Iterable[str]:
+    def get_response(self, prompt: str, history: Optional[List[Dict[str, Any]]] = None) -> str:
         history = history or []
         model = self.settings.primary_model
         api_key = self.settings.primary_api_key
         api_url = self.settings.primary_api_url
         messages = self._build_messages(prompt, history)
         if not api_key or not api_url or not model or not self.client:
-            yield from self.mock_llm.stream_response(prompt, history)
-            return
+            return ""
         request_args: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": 0.6,
-            "max_tokens": self.settings.primary_max_tokens,
-            "stream": True,
+            "max_tokens": 200,
+            "stream": False,
         }
-        yielded_any = False
         try:
-            stream = self.client.chat.completions.create(**request_args)
-            for chunk in stream:
-                if not chunk.choices:
-                    continue
-                delta_content = getattr(chunk.choices[0].delta, "content", None)
-                if not delta_content:
-                    continue
-                # delta_content can be a list of parts or a string
-                if isinstance(delta_content, list):
-                    pieces = []
-                    for part in delta_content:
-                        if hasattr(part, "text"):
-                            text_obj = getattr(part, "text", "")
-                            text_value = getattr(text_obj, "value", None) or getattr(text_obj, "content", None) or text_obj
-                            pieces.append(str(text_value))
-                        elif isinstance(part, dict) and "text" in part:
-                            pieces.append(str(part["text"]))
-                        elif isinstance(part, str):
-                            pieces.append(part)
-                    delta = "".join(pieces)
-                else:
-                    delta = str(delta_content)
-                if delta:
-                    yielded_any = True
-                    yield delta
-            if not yielded_any:
-                # If the stream produced nothing (or only empty parts), fall back to a non-streamed completion
-                fallback = self._complete(prompt, history)
-                if fallback:
-                    yield fallback
-                else:
-                    yield from self.mock_llm.stream_response(prompt, history)
+            resp = self.client.chat.completions.create(**request_args)
+            if resp.choices:
+                content = resp.choices[0].message.content or ""
+                return content.strip()
+            return ""
         except Exception as exc:
             extra = ""
             try:
@@ -421,18 +353,20 @@ class PrimaryLLM:
                     extra = f" status={getattr(resp_obj, 'status_code', '?')} body={getattr(resp_obj, 'text', '')}"
             except Exception:
                 extra = ""
-            app.logger.warning("Primary streaming failed, using mock. Error: %s%s", exc, f" {extra}".rstrip())
-            yield from self.mock_llm.stream_response(prompt, history)
+            app.logger.error("Primary API call failed. Error: %s%s", exc, f" {extra}".rstrip())
+            return ""
 
     def summarize(self, history: List[Dict[str, Any]]) -> str:
-        return self.mock_llm.summarize(history)
+        """Placeholder for summary generation."""
+        return ""
 
     def extract_fact(self, text: str) -> str:
-        return self.mock_llm.extract_fact(text)
+        """Placeholder for fact extraction."""
+        return ""
 
 
 class EventWorker:
-    def __init__(self, store: SessionStore, llm: MockLLM, consumer_name: Optional[str] = None):
+    def __init__(self, store: SessionStore, llm: PrimaryLLM, consumer_name: Optional[str] = None):
         self.store = store
         self.llm = llm
         self.consumer_name = consumer_name or f"worker-{uuid.uuid4().hex[:8]}"
@@ -505,22 +439,14 @@ class EventWorker:
                 return
 
             agent_message_id = str(uuid.uuid4())
+
+            # Signal that agent is working
             self.store.publish_event(
                 session_id,
                 {
-                    "type": "state:update",
-                    "sessionId": session_id,
-                    "status": "processing",
-                    "messageId": message_id,
-                },
-            )
-            self.store.publish_event(
-                session_id,
-                {
-                    "type": "state:update",
-                    "sessionId": session_id,
-                    "state": "calling_api",
+                    "type": "agent:working",
                     "messageId": agent_message_id,
+                    "sessionId": session_id,
                     "inReplyTo": message_id,
                     "agentId": primary_agent_id,
                     "agentName": primary_agent_name,
@@ -528,40 +454,26 @@ class EventWorker:
             )
 
             history = self.store.recent_messages(session_id)
-            self.store.publish_event(
-                session_id,
-                {
-                    "type": "state:update",
-                    "sessionId": session_id,
-                    "state": "responding",
+            full_text = self.llm.get_response(text, history=history)
+
+            # Check if API call failed
+            if not full_text:
+                fail_payload = {
+                    "type": "agent:fail",
                     "messageId": agent_message_id,
+                    "sessionId": session_id,
                     "inReplyTo": message_id,
                     "agentId": primary_agent_id,
                     "agentName": primary_agent_name,
-                },
-            )
-            full_text = ""
-            first_delta_sent = False
-            for idx, delta in enumerate(self.llm.stream_response(text, history=history)):
-                if not first_delta_sent:
-                    first_delta_sent = True
-                full_text += delta
-                self.store.publish_event(
-                    session_id,
-                    {
-                        "type": "message:delta",
-                        "messageId": agent_message_id,
-                        "sessionId": session_id,
-                        "author": f"agent:{primary_agent_id}",
-                        "agentId": primary_agent_id,
-                        "agentName": primary_agent_name,
-                        "delta": delta,
-                        "index": idx,
-                    },
-                )
+                    "reason": "api_error",
+                    "message": "Failed to get response from API",
+                }
+                self.store.publish_event(session_id, fail_payload)
+                return
 
+            # Send complete response
             done_payload = {
-                "type": "message:done",
+                "type": "agent:msg",
                 "messageId": agent_message_id,
                 "sessionId": session_id,
                 "author": f"agent:{primary_agent_id}",
@@ -571,19 +483,8 @@ class EventWorker:
                 "inReplyTo": message_id,
             }
             self.store.publish_event(session_id, done_payload)
-            self.store.publish_event(
-                session_id,
-                {
-                    "type": "state:update",
-                    "sessionId": session_id,
-                    "state": "response_complete",
-                    "messageId": agent_message_id,
-                    "inReplyTo": message_id,
-                    "agentId": primary_agent_id,
-                    "agentName": primary_agent_name,
-                },
-            )
 
+            # Store in recent messages
             agent_message = {
                 "messageId": agent_message_id,
                 "sessionId": session_id,
@@ -595,26 +496,11 @@ class EventWorker:
             }
             self.store.append_recent(session_id, agent_message)
 
-            summary_text = self.llm.summarize(self.store.recent_messages(session_id))
-            self.store.update_summary(session_id, summary_text)
-            self.store.publish_event(
-                session_id,
-                {
-                    "type": "state:update",
-                    "sessionId": session_id,
-                    "state": "summary",
-                    "summary": summary_text,
-                },
-            )
-            if text:
-                self.store.add_fact(session_id, self.llm.extract_fact(text))
-
 
 settings = Settings()
 redis_client = connect_redis(settings.redis_url)
 store = SessionStore(redis_client, settings)
-mock_llm = MockLLM(settings)
-llm = PrimaryLLM(settings, mock_llm)
+llm = PrimaryLLM(settings)
 worker = EventWorker(store, llm)
 
 app = Flask(__name__)
@@ -687,7 +573,7 @@ def post_message() -> Response:
         "sessionId": session_id,
         "author": author,
         "text": text,
-        "type": "message:ack",
+        "type": "user:msg",
     }
     store.publish_event(session_id, ack_payload)
 
@@ -712,6 +598,32 @@ def stream_events(session_id: str) -> Iterable[str]:
     pubsub = store.redis.pubsub()
     pubsub.subscribe(session_pubsub_channel(session_id))
     yield sse_format(json.dumps({"type": "state:update", "status": "connected"}))
+    # Hydrate recent messages/summary to reduce perceived drops on reconnects.
+    try:
+        for msg in store.recent_messages(session_id):
+            role = msg.get("role")
+            if role == "user":
+                payload = {
+                    "type": "user:msg",
+                    "messageId": msg.get("messageId"),
+                    "sessionId": session_id,
+                    "author": msg.get("author", "user"),
+                    "text": msg.get("text", ""),
+                }
+            else:
+                payload = {
+                    "type": "agent:msg",
+                    "messageId": msg.get("messageId"),
+                    "sessionId": session_id,
+                    "author": msg.get("author") or f"agent:{msg.get('agentId', 'agent')}",
+                    "agentId": msg.get("agentId"),
+                    "agentName": msg.get("agentName", settings.primary_agent_name),
+                    "text": msg.get("text", ""),
+                    "inReplyTo": msg.get("inReplyTo") or msg.get("in_reply_to"),
+                }
+            yield sse_format(json.dumps(payload))
+    except Exception as exc:
+        app.logger.debug("stream_events hydration failed: %s", exc)
 
     last_ping = time.time()
     try:

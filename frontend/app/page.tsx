@@ -288,7 +288,7 @@ function PageLayout({
 
     if (!type) return;
 
-    if (type === 'message:ack' && messageId) {
+    if (type === 'user:msg' && messageId) {
       setPendingMessageIds((prev) => {
         const next = new Set(prev);
         next.delete(messageId);
@@ -317,43 +317,62 @@ function PageLayout({
       return;
     }
 
-    if (type === 'message:delta' || type === 'message:done') {
+    if (type === 'agent:msg') {
       const id = messageId || payload.inReplyTo || payload.in_reply_to || Date.now().toString();
-      if (type === 'message:done') {
-        setPendingMessageIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        setSentMessageIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          return next;
-        });
-      }
+      setPendingMessageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setSentMessageIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
 
       setMessages((prev) => {
         const existing = prev.find((m) => m.id === id);
-        const base: ChatMessage = existing || {
+        const nextMessage: ChatMessage = {
           id: id,
           author: authorLabel,
-          text: '',
+          text: payload.text || '',
           timestamp: now,
           type: 'agent',
         };
-        const updated: ChatMessage = {
-          ...base,
+        if (existing) {
+          return prev.map((m) => (m.id === id ? { ...m, ...nextMessage } : m));
+        }
+        return [...prev, nextMessage];
+      });
+      return;
+    }
+
+    if (type === 'agent:fail') {
+      const id = messageId || payload.inReplyTo || payload.in_reply_to || Date.now().toString();
+      setPendingMessageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setSentMessageIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+
+      setMessages((prev) => {
+        const existing = prev.find((m) => m.id === id);
+        const nextMessage: ChatMessage = {
+          id: id,
           author: authorLabel,
-          text: type === 'message:delta'
-            ? `${base.text || ''}${payload.delta || ''}`
-            : (payload.text || base.text || ''),
-          timestamp: base.timestamp || now,
+          text: `❌ ${payload.message || 'Agent failed to respond'}`,
+          timestamp: now,
           type: 'agent',
         };
         if (existing) {
-          return prev.map((m) => (m.id === id ? updated : m));
+          return prev.map((m) => (m.id === id ? { ...m, ...nextMessage } : m));
         }
-        return [...prev, updated];
+        return [...prev, nextMessage];
       });
       return;
     }
@@ -373,7 +392,14 @@ function PageLayout({
       const rawAgent = payload.agentId || (payload.author && typeof payload.author === 'string' && payload.author.startsWith('agent:') ? payload.author.split(':')[1] : undefined);
       if (!rawAgent) return;
 
-      const workingUpdate = type === 'message:delta' ? true : type === 'message:done' ? false : undefined;
+      // Determine working state based on event type
+      let workingUpdate: boolean | undefined;
+      if (type === 'agent:working') {
+        workingUpdate = true;
+      } else if (type === 'agent:msg' || type === 'agent:fail') {
+        workingUpdate = false;
+      }
+
       const nextName = payload.agentName || rawAgent;
       const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'Primary' : 'Agent');
       setAgentStates((prev) => {
@@ -800,6 +826,7 @@ function PageLayout({
                 const state = agentStates[agent.agentId] || { name: agent.name, role: agent.role, working: false, flash: false };
                 const initials = state.name ? state.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : agent.agentId.slice(0, 2).toUpperCase();
                 const flashShadow = state.flash ? `0 0 0 3px ${colors.primary}` : `0 0 0 1px ${colors.border}`;
+                const workingBgColor = state.working ? (theme === 'dark' ? '#1a3a52' : '#e3f2fd') : colors.surface;
                 return (
                   <li key={agent.agentId} style={{
                     display: 'flex',
@@ -807,28 +834,29 @@ function PageLayout({
                     gap: '10px',
                     padding: '10px',
                     borderRadius: '8px',
-                    backgroundColor: colors.surface,
-                    border: `1px solid ${colors.border}`,
+                    backgroundColor: workingBgColor,
+                    border: `1px solid ${state.working ? colors.primary : colors.border}`,
                     boxShadow: flashShadow,
-                    transition: 'box-shadow 0.3s ease'
+                    transition: 'box-shadow 0.3s ease, background-color 0.3s ease, border-color 0.3s ease'
                   }}>
                     <div style={{
                       width: '32px',
                       height: '32px',
                       borderRadius: '50%',
-                      backgroundColor: colors.bubbleUser,
-                      color: colors.text,
+                      backgroundColor: state.working ? colors.primary : colors.bubbleUser,
+                      color: state.working ? '#ffffff' : colors.text,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontWeight: 'bold',
-                      border: `1px solid ${colors.border}`
+                      border: `1px solid ${colors.border}`,
+                      transition: 'background-color 0.3s ease, color 0.3s ease'
                     }}>
                       {initials}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', color: colors.text }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {state.working && <span role="img" aria-label="speaking">🗣️</span>}
+                        {state.working && <span role="img" aria-label="speaking" style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>🗣️</span>}
                         <span style={{ fontWeight: 'bold' }}>{state.name}</span>
                       </div>
                       <span style={{ fontSize: '12px', color: colors.muted }}>{state.role === 'primary' ? 'Primary' : 'Observer'} · {agent.model}</span>
