@@ -51,6 +51,8 @@ export default function HomePage() {
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const [chatTitle, setChatTitle] = useState('new chat');
+  const [topics, setTopics] = useState<string[]>(['111111', '2222222', '3333333']);
+  const [currentTopic, setCurrentTopic] = useState<string>('111111');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef<boolean>(true);
@@ -66,6 +68,20 @@ export default function HomePage() {
       // ignore selection issues on some browsers
     }
   }, []);
+
+  const switchTopic = useCallback((topicId: string) => {
+    setCurrentTopic(topicId);
+    setMessages([]);
+    setChatTitle('new chat');
+    setMessageText('');
+    setSessionId(generateSessionId());
+  }, []);
+
+  const createNewTopic = useCallback(() => {
+    const newTopicId = Math.random().toString(36).substring(2, 15);
+    setTopics((prev) => [newTopicId, ...prev]);
+    switchTopic(newTopicId);
+  }, [switchTopic]);
 
   const colors: ColorPalette = theme === 'dark'
     ? {
@@ -216,6 +232,10 @@ export default function HomePage() {
         setRightPanelVisible={setRightPanelVisible}
         chatTitle={chatTitle}
         setChatTitle={setChatTitle}
+        topics={topics}
+        currentTopic={currentTopic}
+        switchTopic={switchTopic}
+        createNewTopic={createNewTopic}
       />
     </SSEProvider>
   );
@@ -253,6 +273,10 @@ type PageLayoutProps = {
   setRightPanelVisible: React.Dispatch<React.SetStateAction<boolean>>;
   chatTitle: string;
   setChatTitle: React.Dispatch<React.SetStateAction<string>>;
+  topics: string[];
+  currentTopic: string;
+  switchTopic: (topicId: string) => void;
+  createNewTopic: () => void;
 };
 
 function PageLayout({
@@ -287,6 +311,10 @@ function PageLayout({
   setRightPanelVisible,
   chatTitle,
   setChatTitle,
+  topics,
+  currentTopic,
+  switchTopic,
+  createNewTopic,
 }: PageLayoutProps) {
   const { status: sseStatus, error: sseError, lastEvent } = useSSE();
 
@@ -681,16 +709,49 @@ function PageLayout({
           </div>
 
           <div>
-            <div style={{ 
-              fontWeight: 'bold', 
-              fontSize: '14px', 
+            <div style={{
+              fontWeight: 'bold',
+              fontSize: '14px',
               marginBottom: '12px',
               color: colors.text
             }}>Topics</div>
+            <button
+              onClick={createNewTopic}
+              style={{
+                width: '100%',
+                padding: '8px',
+                marginBottom: '8px',
+                backgroundColor: colors.primary,
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '12px',
+              }}
+            >
+              + New topic
+            </button>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              <li style={{ padding: '8px', marginBottom: '4px', color: colors.text }}>Launch brief · active</li>
-              <li style={{ padding: '8px', marginBottom: '4px', color: colors.text }}>User research plan</li>
-              <li style={{ padding: '8px', marginBottom: '4px', color: colors.text }}>Pricing discussion</li>
+              {topics.map((topic) => (
+                <li
+                  key={topic}
+                  onClick={() => switchTopic(topic)}
+                  style={{
+                    padding: '8px',
+                    marginBottom: '4px',
+                    color: currentTopic === topic ? colors.primary : colors.text,
+                    backgroundColor: currentTopic === topic ? colors.surface : 'transparent',
+                    border: currentTopic === topic ? `1px solid ${colors.primary}` : 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: currentTopic === topic ? 'bold' : 'normal',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  {topic}
+                </li>
+              ))}
             </ul>
           </div>
         </aside>
