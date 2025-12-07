@@ -59,7 +59,7 @@ class Settings:
     observer2_name: str = os.getenv("OBSERVER2_NAME", "Sage")
     observer2_model: str = os.getenv("OBSERVER2_MODEL", "gpt-4o-mini-critic")
 
-    primary_api_url: str = os.getenv("PRIMARY_API_URL", "https://api.openai.com/v1/chat/completions")
+    primary_api_url: str = os.getenv("PRIMARY_API_URL", "https://api.openai.com/v1")
     primary_api_key: str = os.getenv("PRIMARY_API_KEY", "")
     primary_system_prompt: str = os.getenv(
         "PRIMARY_SYSTEM_PROMPT",
@@ -67,7 +67,7 @@ class Settings:
     )
     primary_persona: str = os.getenv("PRIMARY_PERSONA", "Primary orchestrator with balanced tone.")
 
-    observer1_api_url: str = os.getenv("OBSERVER1_API_URL", "https://api.openai.com/v1/chat/completions")
+    observer1_api_url: str = os.getenv("OBSERVER1_API_URL", "https://api.openai.com/v1")
     observer1_api_key: str = os.getenv("OBSERVER1_API_KEY", "")
     observer1_system_prompt: str = os.getenv(
         "OBSERVER1_SYSTEM_PROMPT",
@@ -75,7 +75,7 @@ class Settings:
     )
     observer1_persona: str = os.getenv("OBSERVER1_PERSONA", "Curious researcher, crisp bullets.")
 
-    observer2_api_url: str = os.getenv("OBSERVER2_API_URL", "https://api.openai.com/v1/chat/completions")
+    observer2_api_url: str = os.getenv("OBSERVER2_API_URL", "https://api.openai.com/v1")
     observer2_api_key: str = os.getenv("OBSERVER2_API_KEY", "")
     observer2_system_prompt: str = os.getenv(
         "OBSERVER2_SYSTEM_PROMPT",
@@ -86,7 +86,7 @@ class Settings:
     summarizer_id: str = os.getenv("SUMMARIZER_ID", "summarizer")
     summarizer_name: str = os.getenv("SUMMARIZER_NAME", "Summarizer")
     summarizer_model: str = os.getenv("SUMMARIZER_MODEL", "gpt-4o-mini")
-    summarizer_api_url: str = os.getenv("SUMMARIZER_API_URL", "https://api.openai.com/v1/chat/completions")
+    summarizer_api_url: str = os.getenv("SUMMARIZER_API_URL", "https://api.openai.com/v1")
     summarizer_api_key: str = os.getenv("SUMMARIZER_API_KEY", "")
     summarizer_system_prompt: str = os.getenv(
         "SUMMARIZER_SYSTEM_PROMPT",
@@ -444,6 +444,142 @@ class EventWorker:
         self.llm = llm
         self.summarizer = summarizer
         self.consumer_name = consumer_name or f"worker-{uuid.uuid4().hex[:8]}"
+        self.observer_configs = [agent for agent in store.settings.agents if agent.role == "observer"]
+        self.observer_clients: Dict[str, Optional[OpenAI]] = {}
+        self.observer_ids = {agent.agent_id for agent in self.observer_configs}
+
+        for agent in self.observer_configs:
+            if not agent.api_key or not agent.api_url:
+                self.observer_clients[agent.agent_id] = None
+                continue
+            try:
+                self.observer_clients[agent.agent_id] = OpenAI(api_key=agent.api_key, base_url=agent.api_url)
+            except Exception as exc:
+                app.logger.warning("Failed to init observer %s client: %s", agent.agent_id, exc)
+                self.observer_clients[agent.agent_id] = None
+
+    def _build_observer_messages(self, history: List[Dict[str, Any]], primary_text: str, agent: AgentConfig) -> List[Dict[str, Any]]:
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": agent.system_prompt},
+            {"role": "system", "content": agent.persona},
+        ]
+        for msg in history:
+            text = msg.get("text") or ""
+            if not text:
+                continue
+            role = msg.get("role") or "user"
+            api_role = "assistant" if role in ("agent", "observer") else "user"
+            messages.append({"role": api_role, "content": text})
+        messages.append(
+            {
+                "role": "user",
+                "content": f"Primary agent just responded with:\n{primary_text}\n\nReact briefly with a helpful, concise observer note.",
+            }
+        )
+        return messages
+
+    def _run_observer(self, session_id: str, fields: Dict[str, Any], agent: AgentConfig) -> None:
+        client = self.observer_clients.get(agent.agent_id)
+        if not client:
+            app.logger.debug("Observer %s skipped due to missing client", agent.agent_id)
+            return
+
+        primary_text = fields.get("text", "").strip()
+        if not primary_text:
+            return
+
+        message_id = str(uuid.uuid4())
+        in_reply_to = fields.get("messageId") or fields.get("message_id")
+
+        self.store.publish_event(
+            session_id,
+            {
+                "type": "agent:working",
+                "messageId": message_id,
+                "sessionId": session_id,
+                "inReplyTo": in_reply_to,
+                "agentId": agent.agent_id,
+                "agentName": agent.name,
+                "agentRole": agent.role,
+            },
+        )
+
+        history = self.store.recent_messages(session_id)
+        messages = self._build_observer_messages(history, primary_text, agent)
+        request_args: Dict[str, Any] = {
+            "model": agent.model,
+            "messages": messages,
+            "temperature": 0.5,
+            "max_tokens": 200,
+            "stream": False,
+        }
+
+        try:
+            resp = client.chat.completions.create(**request_args)
+            choice = resp.choices[0] if resp.choices else None
+            text = (choice.message.content or "").strip() if choice else ""
+        except Exception as exc:
+            app.logger.warning("Observer %s API call failed: %s", agent.agent_id, exc)
+            self.store.publish_event(
+                session_id,
+                {
+                    "type": "agent:fail",
+                    "messageId": message_id,
+                    "sessionId": session_id,
+                    "inReplyTo": in_reply_to,
+                    "agentId": agent.agent_id,
+                    "agentName": agent.name,
+                    "agentRole": agent.role,
+                    "reason": "api_error",
+                    "message": "Failed to get response from observer API",
+                },
+            )
+            return
+
+        if not text:
+            app.logger.info("Observer %s returned empty response", agent.agent_id)
+            self.store.publish_event(
+                session_id,
+                {
+                    "type": "agent:fail",
+                    "messageId": message_id,
+                    "sessionId": session_id,
+                    "inReplyTo": in_reply_to,
+                    "agentId": agent.agent_id,
+                    "agentName": agent.name,
+                    "agentRole": agent.role,
+                    "reason": "empty_response",
+                    "message": "Observer returned empty response",
+                },
+            )
+            return
+
+        payload = {
+            "type": "agent:msg",
+            "messageId": message_id,
+            "sessionId": session_id,
+            "author": f"agent:{agent.agent_id}",
+            "agentId": agent.agent_id,
+            "agentName": agent.name,
+            "agentRole": agent.role,
+            "text": text,
+            "inReplyTo": in_reply_to,
+        }
+        self.store.publish_event(session_id, payload)
+
+    def _handle_post_primary(self, session_id: str, fields: Dict[str, Any]) -> None:
+        """Run summarizer and observers after primary reply without holding the session lock."""
+        app.logger.info("Worker: Triggering summarizer for primary agent response")
+        self._handle_summarize(session_id, fields)
+        app.logger.info("Worker: Triggering observers for primary agent response")
+        self._handle_observers(session_id, fields)
+
+    def _handle_observers(self, session_id: str, fields: Dict[str, Any]) -> None:
+        if not self.observer_configs:
+            return
+
+        for agent in self.observer_configs:
+            self._run_observer(session_id, fields, agent)
 
     def _stream_map(self) -> Dict[str, str]:
         streams = {}
@@ -500,11 +636,12 @@ class EventWorker:
             # Trigger summarizer when agent responds (but not the summarizer itself)
             agent_id = fields.get("agentId") or (fields.get("author") and fields.get("author").split(":")[-1])
             app.logger.info(f"Worker: Detected agent:msg from {agent_id}")
-            if agent_id != self.store.settings.summarizer_id:
-                app.logger.info(f"Worker: Triggering summarizer for agent:msg from {agent_id}")
-                self._handle_summarize(session_id, fields)
-            else:
-                app.logger.debug(f"Worker: Skipping summarization for summarizer's own message")
+            if agent_id == self.store.settings.primary_agent_id:
+                app.logger.debug("Worker: Primary agent:msg already handled inline; skipping follow-on actions")
+            elif agent_id == self.store.settings.summarizer_id:
+                app.logger.debug("Worker: Skipping follow-on actions for summarizer message")
+            elif agent_id in self.observer_ids:
+                app.logger.debug("Worker: Received observer message; no further action")
 
     def _handle_new_message(self, session_id: str, fields: Dict[str, Any]) -> None:
         message_id = fields.get("message_id") or str(uuid.uuid4())
@@ -534,6 +671,7 @@ class EventWorker:
                     "inReplyTo": message_id,
                     "agentId": primary_agent_id,
                     "agentName": primary_agent_name,
+                    "agentRole": "primary",
                 },
             )
 
@@ -549,6 +687,7 @@ class EventWorker:
                     "inReplyTo": message_id,
                     "agentId": primary_agent_id,
                     "agentName": primary_agent_name,
+                    "agentRole": "primary",
                     "reason": "api_error",
                     "message": "Failed to get response from API",
                 }
@@ -559,6 +698,7 @@ class EventWorker:
                         "type": "agent:fail",
                         "agentId": primary_agent_id,
                         "agentName": primary_agent_name,
+                        "agentRole": "primary",
                         "messageId": agent_message_id,
                     },
                 )
@@ -573,6 +713,7 @@ class EventWorker:
                 "author": f"agent:{primary_agent_id}",
                 "agentId": primary_agent_id,
                 "agentName": primary_agent_name,
+                "agentRole": "primary",
                 "text": full_text.strip(),
                 "inReplyTo": message_id,
             }
@@ -596,12 +737,16 @@ class EventWorker:
                     "type": "agent:msg",
                     "agentId": primary_agent_id,
                     "agentName": primary_agent_name,
+                    "agentRole": "primary",
                     "text": full_text.strip(),
                     "messageId": agent_message_id,
                 },
             )
             # Publish to UI clients
             self.store.publish_event(session_id, done_payload)
+
+        # Trigger summarizer and observers after releasing the lock
+        self._handle_post_primary(session_id, done_payload)
 
     def _handle_summarize(self, session_id: str, fields: Dict[str, Any]) -> None:
         """Handle summarization when an agent message is received."""
@@ -630,6 +775,7 @@ class EventWorker:
                     "inReplyTo": message_id,
                     "agentId": summarizer_id,
                     "agentName": summarizer_name,
+                    "agentRole": "hidden_agent",
                 },
             )
 
@@ -652,6 +798,7 @@ class EventWorker:
                 "author": f"agent:{summarizer_id}",
                 "agentId": summarizer_id,
                 "agentName": summarizer_name,
+                "agentRole": "hidden_agent",
                 "text": summary_text.strip(),
                 "inReplyTo": message_id,
             }

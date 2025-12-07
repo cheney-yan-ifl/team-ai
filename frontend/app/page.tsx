@@ -17,6 +17,7 @@ type AgentState = {
   flash: boolean;
   name: string;
   role: string;
+  hasUpdate: boolean;
   model?: string;
 };
 
@@ -140,7 +141,7 @@ export default function HomePage() {
     setAgentStates((prev) => {
       const next: Record<string, AgentState> = {};
       agents.forEach((agent) => {
-        const existing = prev[agent.agentId] || { working: false, flash: false, name: agent.name, role: agent.role };
+        const existing = prev[agent.agentId] || { working: false, flash: false, hasUpdate: false, name: agent.name, role: agent.role };
         next[agent.agentId] = {
           ...existing,
           name: agent.name,
@@ -148,6 +149,7 @@ export default function HomePage() {
           model: agent.model,
           flash: existing.flash,
           working: existing.working,
+          hasUpdate: existing.hasUpdate,
         };
       });
       return next;
@@ -376,8 +378,13 @@ function PageLayout({
 
     if (type === 'agent:msg') {
       const agentIdLower = (payload.agentId || '').toLowerCase();
-      if (agentIdLower === 'summarizer') {
+      const agentRole = (payload.agentRole || payload.role || (agentIdLower === 'primary' ? 'primary' : 'observer')) as string | undefined;
+      if (agentIdLower === 'summarizer' || agentRole === 'hidden_agent') {
         setLatestSummary(payload.text || '');
+        return;
+      }
+
+      if (agentRole === 'observer' && agentIdLower !== 'summarizer') {
         return;
       }
 
@@ -412,6 +419,11 @@ function PageLayout({
     }
 
     if (type === 'agent:fail') {
+      const agentIdLower = (payload.agentId || '').toLowerCase();
+      const agentRole = (payload.agentRole || payload.role || (agentIdLower === 'primary' ? 'primary' : 'observer')) as string | undefined;
+      if (agentRole === 'observer') {
+        return;
+      }
       const id = messageId || payload.inReplyTo || payload.in_reply_to || Date.now().toString();
       setPendingMessageIds((prev) => {
         const next = new Set(prev);
@@ -465,9 +477,10 @@ function PageLayout({
       }
 
       const nextName = payload.agentName || rawAgent;
-      const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'primary' : 'observer');
+      const nextRole = payload.agentRole || payload.role || (rawAgent === 'primary' ? 'primary' : 'observer');
+      const shouldFlagUpdate = type === 'agent:msg' && nextRole === 'observer';
       setAgentStates((prev) => {
-        const existing = prev[rawAgent] || { name: rawAgent, role: 'observer', working: false, flash: false };
+        const existing = prev[rawAgent] || { name: rawAgent, role: 'observer', working: false, flash: false, hasUpdate: false };
         return {
           ...prev,
           [rawAgent]: {
@@ -476,11 +489,13 @@ function PageLayout({
             role: nextRole || existing.role,
             working: workingUpdate !== undefined ? workingUpdate : existing.working,
             flash: true,
+            hasUpdate: shouldFlagUpdate ? true : existing.hasUpdate,
           },
         };
       });
 
-      const timer = setTimeout(() => {
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      timers.push(setTimeout(() => {
         setAgentStates((prev) => {
           const existing = prev[rawAgent];
           if (!existing) return prev;
@@ -489,9 +504,22 @@ function PageLayout({
             [rawAgent]: { ...existing, flash: false },
           };
         });
-      }, 700);
+      }, 700));
 
-      return () => clearTimeout(timer);
+      if (shouldFlagUpdate) {
+        timers.push(setTimeout(() => {
+          setAgentStates((prev) => {
+            const existing = prev[rawAgent];
+            if (!existing) return prev;
+            return {
+              ...prev,
+              [rawAgent]: { ...existing, hasUpdate: false },
+            };
+          });
+        }, 4000));
+      }
+
+      return () => timers.forEach(clearTimeout);
     } catch {
       // ignore malformed SSE payloads
     }
@@ -940,7 +968,7 @@ function PageLayout({
             }}>Participant Agents</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {agents.filter(agent => agent.role !== 'hidden_agent').map((agent) => {
-                const state = agentStates[agent.agentId] || { name: agent.name, role: agent.role, working: false, flash: false };
+                const state = agentStates[agent.agentId] || { name: agent.name, role: agent.role, working: false, flash: false, hasUpdate: false };
                 const initials = state.name ? state.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : agent.agentId.slice(0, 2).toUpperCase();
                 const flashShadow = state.flash ? `0 0 0 3px ${colors.primary}` : `0 0 0 1px ${colors.border}`;
                 const workingBgColor = state.working ? (theme === 'dark' ? '#1a3a52' : '#e3f2fd') : colors.surface;
@@ -974,6 +1002,7 @@ function PageLayout({
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', color: colors.text }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {state.working && <span role="img" aria-label="speaking" style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>🗣️</span>}
+                        {state.hasUpdate && !state.working && <span role="img" aria-label="observer update" style={{ animation: 'pulse 1.2s ease-in-out infinite' }}>🔊</span>}
                         <span style={{ fontWeight: 'bold' }}>{state.name}</span>
                         <span style={{
                           background: state.role === 'primary' ? colors.primary : colors.muted,
