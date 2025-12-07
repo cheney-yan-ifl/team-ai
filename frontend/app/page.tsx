@@ -50,6 +50,7 @@ export default function HomePage() {
   const [sentMessageIds, setSentMessageIds] = useState<Set<string>>(new Set());
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
+  const [chatTitle, setChatTitle] = useState('new chat');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef<boolean>(true);
@@ -213,6 +214,8 @@ export default function HomePage() {
         setLeftPanelVisible={setLeftPanelVisible}
         rightPanelVisible={rightPanelVisible}
         setRightPanelVisible={setRightPanelVisible}
+        chatTitle={chatTitle}
+        setChatTitle={setChatTitle}
       />
     </SSEProvider>
   );
@@ -248,6 +251,8 @@ type PageLayoutProps = {
   setLeftPanelVisible: React.Dispatch<React.SetStateAction<boolean>>;
   rightPanelVisible: boolean;
   setRightPanelVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  chatTitle: string;
+  setChatTitle: React.Dispatch<React.SetStateAction<string>>;
 };
 
 function PageLayout({
@@ -280,6 +285,8 @@ function PageLayout({
   setLeftPanelVisible,
   rightPanelVisible,
   setRightPanelVisible,
+  chatTitle,
+  setChatTitle,
 }: PageLayoutProps) {
   const { status: sseStatus, error: sseError, lastEvent } = useSSE();
 
@@ -462,6 +469,18 @@ function PageLayout({
     }
   }, [messages.length, messagesContainerRef, isAtBottomRef]);
 
+  useEffect(() => {
+    if (messages.length === 0) {
+      setChatTitle('new chat');
+    } else {
+      const firstUserMsg = messages.find((m) => m.type === 'user');
+      if (firstUserMsg) {
+        const preview = firstUserMsg.text.slice(0, 50);
+        setChatTitle(preview.length < firstUserMsg.text.length ? preview + '...' : preview);
+      }
+    }
+  }, [messages, setChatTitle]);
+
   return (
     <main style={{
       height: '100%',
@@ -494,15 +513,14 @@ function PageLayout({
           }}>beta</span>
           <div>
             <div style={{ fontWeight: 'bold', fontSize: '18px' }}>AI Team Workspace</div>
-            <div style={{ color: colors.muted, fontSize: '14px' }}>Primary + observers with live context</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           <button
             onClick={() => setLeftPanelVisible(!leftPanelVisible)}
             title={leftPanelVisible ? 'Hide left panel' : 'Show left panel'}
             style={{
-              padding: '8px 12px',
+              padding: '6px',
               border: `1px solid ${colors.border}`,
               backgroundColor: colors.surface,
               color: colors.text,
@@ -510,20 +528,32 @@ function PageLayout({
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px'
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="7" height="18" rx="1" />
-              <line x1="14" y1="3" x2="14" y2="21" />
-              <line x1="18" y1="3" x2="18" y2="21" />
-            </svg>
+            {leftPanelVisible ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="18" rx="1" />
+                <line x1="14" y1="3" x2="14" y2="21" />
+                <line x1="18" y1="3" x2="18" y2="21" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="4" y1="3" x2="4" y2="21" />
+                <line x1="8" y1="3" x2="8" y2="21" />
+                <line x1="12" y1="3" x2="12" y2="21" />
+                <line x1="16" y1="3" x2="16" y2="21" />
+                <line x1="20" y1="3" x2="20" y2="21" />
+              </svg>
+            )}
           </button>
           <button
             onClick={() => setRightPanelVisible(!rightPanelVisible)}
             title={rightPanelVisible ? 'Hide right panel' : 'Show right panel'}
             style={{
-              padding: '8px 12px',
+              padding: '6px',
               border: `1px solid ${colors.border}`,
               backgroundColor: colors.surface,
               color: colors.text,
@@ -531,44 +561,62 @@ function PageLayout({
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px'
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="6" y1="3" x2="6" y2="21" />
-              <line x1="10" y1="3" x2="10" y2="21" />
-              <rect x="14" y="3" width="7" height="18" rx="1" />
-            </svg>
+            {rightPanelVisible ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="6" y1="3" x2="6" y2="21" />
+                <line x1="10" y1="3" x2="10" y2="21" />
+                <rect x="14" y="3" width="7" height="18" rx="1" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="4" y1="3" x2="4" y2="21" />
+                <line x1="8" y1="3" x2="8" y2="21" />
+                <line x1="12" y1="3" x2="12" y2="21" />
+                <line x1="16" y1="3" x2="16" y2="21" />
+                <line x1="20" y1="3" x2="20" y2="21" />
+              </svg>
+            )}
           </button>
           <button
             onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
             style={{
-              padding: '8px 12px',
+              padding: '6px',
               border: `1px solid ${colors.border}`,
               backgroundColor: colors.surface,
               color: colors.text,
               borderRadius: '6px',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px'
             }}
           >
-            {theme === 'light' ? 'Dark mode' : 'Light mode'}
+            {theme === 'light' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
           </button>
-          <button style={{
-            padding: '8px 16px',
-            border: `1px solid ${colors.border}`,
-            backgroundColor: 'transparent',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            color: colors.text
-          }}>New Topic</button>
-          <button style={{
-            padding: '8px 16px',
-            backgroundColor: colors.primary,
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer'
-          }}>Start session</button>
         </div>
       </header>
 
@@ -671,37 +719,11 @@ function PageLayout({
                 marginBottom: '4px'
               }}>Session: {sessionId.slice(-8)}</div>
               <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-                Ideas for a calmer workspace launch
+                {chatTitle}
               </div>
               <p style={{ color: colors.muted, margin: 0 }}>
                 Connected to backend. Messages are sent to Redis for persistence.
               </p>
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <span style={{
-                padding: '4px 8px',
-                backgroundColor: health?.status === 'ok' && health?.redis === 'up' ? colors.bubbleAgent : colors.badgeBg,
-                color: getHealthColor(),
-                borderRadius: '12px',
-                fontSize: '12px',
-                border: `1px solid ${colors.border}`
-              }}>{getHealthStatus()}</span>
-              <span style={{
-                padding: '4px 8px',
-                backgroundColor: colors.badgeBg,
-                color: colors.muted,
-                borderRadius: '12px',
-                fontSize: '12px',
-                border: `1px solid ${colors.badgeBorder}`
-              }}>3 agents online</span>
-              <span style={{
-                padding: '4px 8px',
-                backgroundColor: colors.badgeBg,
-                color: colors.muted,
-                borderRadius: '12px',
-                fontSize: '12px',
-                border: `1px solid ${colors.badgeBorder}`
-              }}>Session active</span>
             </div>
           </div>
 
@@ -836,44 +858,6 @@ function PageLayout({
           overflowX: 'hidden',
           display: rightPanelVisible ? 'block' : 'none'
         }}>
-          <div style={{ marginBottom: '24px' }}>
-            <div style={{ 
-              fontWeight: 'bold', 
-              fontSize: '14px', 
-              marginBottom: '12px',
-              color: colors.text
-            }}>Connection Status</div>
-            <div style={{
-              padding: '8px',
-              marginBottom: '8px',
-              borderRadius: '4px',
-              backgroundColor: health?.status === 'ok' ? colors.bubbleAgent : colors.bubbleUser,
-              color: colors.text,
-              border: `1px solid ${colors.border}`
-            }}>
-              Backend: {health?.status || 'checking...'}
-            </div>
-            <div style={{
-              padding: '8px',
-              marginBottom: '8px',
-              borderRadius: '4px',
-              backgroundColor: health?.redis === 'up' ? colors.bubbleAgent : colors.bubbleUser,
-              color: colors.text,
-              border: `1px solid ${colors.border}`
-            }}>
-              Redis: {health?.redis || 'checking...'}
-            </div>
-            <div style={{
-              padding: '8px',
-              borderRadius: '4px',
-              backgroundColor: colors.badgeBg,
-              color: colors.text,
-              border: `1px solid ${colors.border}`
-            }}>
-              SSE: {sseStatus}{sseError ? ' (error)' : ''}
-            </div>
-          </div>
-
           <div style={{ marginBottom: '24px' }}>
             <div style={{ 
               fontWeight: 'bold', 
