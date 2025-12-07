@@ -53,6 +53,7 @@ export default function HomePage() {
   const [chatTitle, setChatTitle] = useState('new chat');
   const [topics, setTopics] = useState<string[]>(['111111', '2222222', '3333333']);
   const [currentTopic, setCurrentTopic] = useState<string>('111111');
+  const [latestSummary, setLatestSummary] = useState<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef<boolean>(true);
@@ -75,6 +76,7 @@ export default function HomePage() {
     setChatTitle('new chat');
     setMessageText('');
     setSessionId(generateSessionId());
+    setLatestSummary('');
   }, []);
 
   const createNewTopic = useCallback(() => {
@@ -236,6 +238,8 @@ export default function HomePage() {
         currentTopic={currentTopic}
         switchTopic={switchTopic}
         createNewTopic={createNewTopic}
+        latestSummary={latestSummary}
+        setLatestSummary={setLatestSummary}
       />
     </SSEProvider>
   );
@@ -277,6 +281,8 @@ type PageLayoutProps = {
   currentTopic: string;
   switchTopic: (topicId: string) => void;
   createNewTopic: () => void;
+  latestSummary: string;
+  setLatestSummary: React.Dispatch<React.SetStateAction<string>>;
 };
 
 function PageLayout({
@@ -315,6 +321,8 @@ function PageLayout({
   currentTopic,
   switchTopic,
   createNewTopic,
+  latestSummary,
+  setLatestSummary,
 }: PageLayoutProps) {
   const { status: sseStatus, error: sseError, lastEvent } = useSSE();
 
@@ -393,6 +401,13 @@ function PageLayout({
         }
         return [...prev, nextMessage];
       });
+
+      // Extract summary if this is from the summarizer agent
+      const agentIdLower = (payload.agentId || '').toLowerCase();
+      if (agentIdLower === 'summarizer') {
+        setLatestSummary(payload.text || '');
+      }
+
       return;
     }
 
@@ -425,7 +440,7 @@ function PageLayout({
       });
       return;
     }
-  }, [lastEvent, setMessages, setPendingMessageIds, setSentMessageIds]);
+  }, [lastEvent, setMessages, setPendingMessageIds, setSentMessageIds, setLatestSummary]);
 
   useEffect(() => {
     if (textareaRef.current && document.activeElement !== textareaRef.current) {
@@ -992,7 +1007,7 @@ function PageLayout({
                 Messages: {messages.length}
               </li>
               <li style={{ padding: '4px 0', color: colors.text }}>
-                Status: Active
+                {latestSummary ? `Summarize: ${latestSummary.slice(0, 100)}${latestSummary.length > 100 ? '...' : ''}` : 'Status: Active'}
               </li>
             </ul>
           </div>
