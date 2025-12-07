@@ -494,12 +494,17 @@ class EventWorker:
     def _handle_event(self, session_id: str, stream_name: str, entry_id: str, fields: Dict[str, Any]) -> None:
         event_type = fields.get("type")
         if event_type == "message:new":
+            app.logger.debug(f"Worker: Processing message:new event from user")
             self._handle_new_message(session_id, fields)
         elif event_type == "agent:msg":
             # Trigger summarizer when agent responds (but not the summarizer itself)
             agent_id = fields.get("agentId") or (fields.get("author") and fields.get("author").split(":")[-1])
+            app.logger.info(f"Worker: Detected agent:msg from {agent_id}")
             if agent_id != self.store.settings.summarizer_id:
+                app.logger.info(f"Worker: Triggering summarizer for agent:msg from {agent_id}")
                 self._handle_summarize(session_id, fields)
+            else:
+                app.logger.debug(f"Worker: Skipping summarization for summarizer's own message")
 
     def _handle_new_message(self, session_id: str, fields: Dict[str, Any]) -> None:
         message_id = fields.get("message_id") or str(uuid.uuid4())
@@ -547,6 +552,16 @@ class EventWorker:
                     "reason": "api_error",
                     "message": "Failed to get response from API",
                 }
+                # Enqueue to stream so worker can detect failure
+                self.store.enqueue_event(
+                    session_id,
+                    {
+                        "type": "agent:fail",
+                        "agentId": primary_agent_id,
+                        "agentName": primary_agent_name,
+                        "messageId": agent_message_id,
+                    },
+                )
                 self.store.publish_event(session_id, fail_payload)
                 return
 
@@ -561,6 +576,18 @@ class EventWorker:
                 "text": full_text.strip(),
                 "inReplyTo": message_id,
             }
+            # Enqueue to stream so worker can detect and trigger summarizer
+            self.store.enqueue_event(
+                session_id,
+                {
+                    "type": "agent:msg",
+                    "agentId": primary_agent_id,
+                    "agentName": primary_agent_name,
+                    "text": full_text.strip(),
+                    "messageId": agent_message_id,
+                },
+            )
+            # Publish to UI clients
             self.store.publish_event(session_id, done_payload)
 
             # Store in recent messages
@@ -579,15 +606,20 @@ class EventWorker:
         """Handle summarization when an agent message is received."""
         summarizer_id = self.store.settings.summarizer_id
         summarizer_name = self.store.settings.summarizer_name
+        agent_id = fields.get("agentId", "unknown")
+
+        app.logger.info(f"Summarizer: Detected agent:msg from {agent_id}, attempting to summarize")
 
         with self.store.session_lock(session_id) as locked:
             if not locked:
+                app.logger.warning(f"Summarizer: Failed to acquire lock for session {session_id}")
                 return
 
             message_id = fields.get("messageId") or str(uuid.uuid4())
             summary_message_id = str(uuid.uuid4())
 
             # Signal that summarizer is working
+            app.logger.info(f"Summarizer: Publishing working event for session {session_id}")
             self.store.publish_event(
                 session_id,
                 {
@@ -602,11 +634,13 @@ class EventWorker:
 
             # Get conversation history and summarize
             history = self.store.recent_messages(session_id)
+            app.logger.info(f"Summarizer: Got {len(history)} messages from history")
             summary_text = self.summarizer.summarize(history)
+            app.logger.info(f"Summarizer: Generated summary of length {len(summary_text)}")
 
             # Check if summarization failed
             if not summary_text:
-                app.logger.debug("Summarizer returned empty response for session %s", session_id)
+                app.logger.warning(f"Summarizer: Empty response for session {session_id}")
                 return
 
             # Send summary as agent message
@@ -620,6 +654,7 @@ class EventWorker:
                 "text": summary_text.strip(),
                 "inReplyTo": message_id,
             }
+            app.logger.info(f"Summarizer: Publishing summary for session {session_id}")
             self.store.publish_event(session_id, summary_payload)
 
             # Store in recent messages
@@ -633,6 +668,7 @@ class EventWorker:
                 "timestamp": time.time(),
             }
             self.store.append_recent(session_id, summary_message)
+            app.logger.info(f"Summarizer: Completed for session {session_id}")
 
 settings = Settings()
 redis_client = connect_redis(settings.redis_url)
