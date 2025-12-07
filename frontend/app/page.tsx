@@ -48,6 +48,8 @@ export default function HomePage() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [pendingMessageIds, setPendingMessageIds] = useState<Set<string>>(new Set());
   const [sentMessageIds, setSentMessageIds] = useState<Set<string>>(new Set());
+  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
+  const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef<boolean>(true);
@@ -207,6 +209,10 @@ export default function HomePage() {
         isAtBottomRef={isAtBottomRef}
         getHealthStatus={getHealthStatus}
         getHealthColor={getHealthColor}
+        leftPanelVisible={leftPanelVisible}
+        setLeftPanelVisible={setLeftPanelVisible}
+        rightPanelVisible={rightPanelVisible}
+        setRightPanelVisible={setRightPanelVisible}
       />
     </SSEProvider>
   );
@@ -238,6 +244,10 @@ type PageLayoutProps = {
   isAtBottomRef: React.MutableRefObject<boolean>;
   getHealthStatus: () => string;
   getHealthColor: () => string;
+  leftPanelVisible: boolean;
+  setLeftPanelVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  rightPanelVisible: boolean;
+  setRightPanelVisible: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
 function PageLayout({
@@ -266,6 +276,10 @@ function PageLayout({
   isAtBottomRef,
   getHealthStatus,
   getHealthColor,
+  leftPanelVisible,
+  setLeftPanelVisible,
+  rightPanelVisible,
+  setRightPanelVisible,
 }: PageLayoutProps) {
   const { status: sseStatus, error: sseError, lastEvent } = useSSE();
 
@@ -485,6 +499,48 @@ function PageLayout({
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button
+            onClick={() => setLeftPanelVisible(!leftPanelVisible)}
+            title={leftPanelVisible ? 'Hide left panel' : 'Show left panel'}
+            style={{
+              padding: '8px 12px',
+              border: `1px solid ${colors.border}`,
+              backgroundColor: colors.surface,
+              color: colors.text,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="7" height="18" rx="1" />
+              <line x1="14" y1="3" x2="14" y2="21" />
+              <line x1="18" y1="3" x2="18" y2="21" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setRightPanelVisible(!rightPanelVisible)}
+            title={rightPanelVisible ? 'Hide right panel' : 'Show right panel'}
+            style={{
+              padding: '8px 12px',
+              border: `1px solid ${colors.border}`,
+              backgroundColor: colors.surface,
+              color: colors.text,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="6" y1="3" x2="6" y2="21" />
+              <line x1="10" y1="3" x2="10" y2="21" />
+              <rect x="14" y="3" width="7" height="18" rx="1" />
+            </svg>
+          </button>
+          <button
             onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
             style={{
               padding: '8px 12px',
@@ -502,7 +558,8 @@ function PageLayout({
             border: `1px solid ${colors.border}`,
             backgroundColor: 'transparent',
             borderRadius: '6px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            color: colors.text
           }}>New Topic</button>
           <button style={{
             padding: '8px 16px',
@@ -517,13 +574,14 @@ function PageLayout({
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '240px minmax(0, 1fr) 260px',
+        gridTemplateColumns: `${leftPanelVisible ? '260px' : '0'} minmax(0, 1fr) ${rightPanelVisible ? '300px' : '0'}`,
         flexGrow: 1,
         minHeight: 0,
         width: '100%',
         boxSizing: 'border-box',
         overflow: 'hidden',
-        gap: '0px'
+        gap: '0px',
+        transition: 'grid-template-columns 0.3s ease'
       }}>
         <aside style={{
           backgroundColor: colors.surface,
@@ -534,7 +592,8 @@ function PageLayout({
           boxSizing: 'border-box',
           width: '100%',
           maxWidth: '100%',
-          overflowX: 'hidden'
+          overflowX: 'hidden',
+          display: leftPanelVisible ? 'block' : 'none'
         }}>
           <div style={{ marginBottom: '24px' }}>
             <div style={{ 
@@ -774,7 +833,8 @@ function PageLayout({
           boxSizing: 'border-box',
           width: '100%',
           maxWidth: '100%',
-          overflowX: 'hidden'
+          overflowX: 'hidden',
+          display: rightPanelVisible ? 'block' : 'none'
         }}>
           <div style={{ marginBottom: '24px' }}>
             <div style={{ 

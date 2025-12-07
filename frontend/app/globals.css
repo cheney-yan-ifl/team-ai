@@ -4,18 +4,19 @@ html, body, #__next {
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
-  background: #ffffff;
+  background: #1a1a1a;
 }
 
 body {
   font-family: -apple-system, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-  color: #333;
+  color: #e0e0e0;
 }
 
 .page {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: #1a1a1a;
 }
 
 .topbar {
@@ -23,83 +24,106 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 1rem;
-  border-bottom: 1px solid #ddd;
-  background: white;
+  border-bottom: 1px solid #2a2a2a;
+  background: #222;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: 240px 1fr 280px;
-  gap: 1rem;
-  padding: 1rem;
+  grid-template-columns: 260px 1fr 300px;
+  gap: 0;
+  padding: 0;
   flex: 1;
+  transition: grid-template-columns 0.3s ease;
 }
 
 .panel {
-  background: white;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
+  background: #242424;
+  border: none;
+  border-radius: 0;
+  padding: 1.5rem;
+  border-right: 1px solid #2a2a2a;
+  overflow-y: auto;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
 .chat {
-  background: white;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  background: #1a1a1a;
+  border: none;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   min-height: 70vh;
 }
 
 .banner {
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid #2a2a2a;
   padding: 1rem;
   display: flex;
   justify-content: space-between;
   gap: 1rem;
+  background: #222;
 }
 
 .stream {
-  padding: 1rem;
+  padding: 2rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
   flex: 1;
+  overflow-y: auto;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .bubble {
   padding: 1rem;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  background: #f9f9f9;
+  border-radius: 12px;
+  border: none;
+  background: #2a2a2a;
+  max-width: 100%;
 }
 
 .bubble.user {
-  background: #fff7ed;
-  border-color: #fed7aa;
+  background: #2a5a8a;
+  margin-left: auto;
+  margin-right: 0;
+  max-width: 70%;
 }
 
 .bubble.agent {
-  background: #f0f9ff;
-  border-color: #bae6fd;
+  background: #2a2a2a;
+  margin-left: 0;
+  margin-right: auto;
+  max-width: 85%;
 }
 
 .composer {
   margin-top: auto;
-  padding: 1rem;
-  border-top: 1px solid #ddd;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #2a2a2a;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  background: #222;
 }
 
 .composer textarea {
   width: 100%;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 0.5rem;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 0.75rem;
   resize: vertical;
   font-family: inherit;
+  background: #2a2a2a;
+  color: #e0e0e0;
+}
+
+.composer textarea:focus {
+  outline: none;
+  border-color: #4a4a4a;
+  background: #323232;
 }
 
 .composer-actions {
@@ -116,38 +140,53 @@ body {
 button {
   border: none;
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
+  background: #3a3a3a;
+  color: #e0e0e0;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #4a4a4a;
 }
 
 button.ghost {
-  background: #f8f9fa;
-  border: 1px solid #ddd;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+}
+
+button.ghost:hover {
+  background: #323232;
 }
 
 button.solid {
-  background: #2563eb;
+  background: #4a7c99;
   color: white;
 }
 
+button.solid:hover {
+  background: #5a8ca9;
+}
+
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .chip {
-  padding: 0.25rem 0.5rem;
+  padding: 0.25rem 0.75rem;
   border-radius: 999px;
-  background: #e7eeff;
-  color: #2563eb;
+  background: #3a4a5a;
+  color: #7fb3d5;
   font-size: 0.75rem;
   font-weight: 600;
 }
 
 .chip.good {
-  color: #0f766e;
-  background: #e0f2f1;
+  color: #4ade80;
+  background: #1a3a2a;
 }
 
 .status-indicator {
@@ -159,13 +198,13 @@ button:disabled {
 }
 
 .status-connected {
-  background: #dcfce7;
-  color: #16a34a;
+  background: #1a3a2a;
+  color: #4ade80;
 }
 
 .status-disconnected {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #3a1a2a;
+  color: #ff4444;
 }
 
 .list {
@@ -179,8 +218,15 @@ button:disabled {
 
 .list-item {
   padding: 0.5rem;
-  border-radius: 4px;
-  border: 1px solid #ddd;
+  border-radius: 6px;
+  border: none;
+  background: #2a2a2a;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.list-item:hover {
+  background: #323232;
 }
 
 .meta {
@@ -188,17 +234,17 @@ button:disabled {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.75rem;
-  color: #666;
+  color: #888;
   margin-bottom: 0.5rem;
 }
 
 .meta .author {
   font-weight: 700;
-  color: #333;
+  color: #aaa;
 }
 
 .muted {
-  color: #666;
+  color: #888;
 }
 
 .brand {
@@ -210,11 +256,12 @@ button:disabled {
 .title {
   font-size: 1.125rem;
   font-weight: 700;
+  color: #e0e0e0;
 }
 
 .subtitle {
   font-size: 0.8rem;
-  color: #666;
+  color: #888;
 }
 
 .pill {
@@ -222,19 +269,21 @@ button:disabled {
   align-items: center;
   padding: 0.25rem 0.5rem;
   border-radius: 999px;
-  background: #e0f2fe;
-  color: #0369a1;
+  background: #2a4a5a;
+  color: #7fb3d5;
   font-size: 0.75rem;
   font-weight: 700;
 }
 
 .section {
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .section-title {
   font-weight: 700;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: #e0e0e0;
+  font-size: 0.9rem;
 }
 
 .badge {
@@ -248,13 +297,13 @@ button:disabled {
 }
 
 .badge.primary {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: #2a4a7a;
+  color: #7fb3d5;
 }
 
 .badge.observer {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: #3a3a3a;
+  color: #aaa;
 }
 
 .top-actions {
@@ -272,6 +321,7 @@ button:disabled {
 .banner-title {
   font-size: 1.25rem;
   font-weight: 700;
+  color: #e0e0e0;
 }
 
 .chips {
