@@ -386,10 +386,63 @@ class PrimaryLLM:
         return ""
 
 
+class SummarizerLLM:
+    """OpenAI-compatible API client for summarizing conversations."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.client: Optional[OpenAI] = None
+        if settings.summarizer_api_key and settings.summarizer_api_url:
+            try:
+                self.client = OpenAI(api_key=settings.summarizer_api_key, base_url=settings.summarizer_api_url)
+            except Exception as exc:  # pragma: no cover - defensive
+                app.logger.warning("Failed to init Summarizer OpenAI client: %s", exc)
+                self.client = None
+
+    def summarize(self, history: List[Dict[str, Any]]) -> str:
+        """Summarize conversation history into 200 words."""
+        if not self.client or not self.settings.summarizer_api_key:
+            return ""
+
+        # Build conversation text from history
+        conversation_text = ""
+        for msg in history:
+            author = msg.get("author", "Unknown")
+            text = msg.get("text", "")
+            conversation_text += f"{author}: {text}\n\n"
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": self.settings.summarizer_system_prompt},
+            {"role": "system", "content": self.settings.summarizer_persona},
+            {
+                "role": "user",
+                "content": f"Please summarize this conversation in approximately 200 words:\n\n{conversation_text}",
+            },
+        ]
+
+        request_args: Dict[str, Any] = {
+            "model": self.settings.summarizer_model,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": 250,
+            "stream": False,
+        }
+        try:
+            resp = self.client.chat.completions.create(**request_args)
+            if resp.choices:
+                content = resp.choices[0].message.content or ""
+                return content.strip()
+            return ""
+        except Exception as exc:
+            app.logger.error("Summarizer API call failed. Error: %s", exc)
+            return ""
+
+
 class EventWorker:
-    def __init__(self, store: SessionStore, llm: PrimaryLLM, consumer_name: Optional[str] = None):
+    def __init__(self, store: SessionStore, llm: PrimaryLLM, summarizer: SummarizerLLM, consumer_name: Optional[str] = None):
         self.store = store
         self.llm = llm
+        self.summarizer = summarizer
         self.consumer_name = consumer_name or f"worker-{uuid.uuid4().hex[:8]}"
 
     def _stream_map(self) -> Dict[str, str]:
@@ -442,6 +495,11 @@ class EventWorker:
         event_type = fields.get("type")
         if event_type == "message:new":
             self._handle_new_message(session_id, fields)
+        elif event_type == "agent:msg":
+            # Trigger summarizer when agent responds (but not the summarizer itself)
+            agent_id = fields.get("agentId") or (fields.get("author") and fields.get("author").split(":")[-1])
+            if agent_id != self.store.settings.summarizer_id:
+                self._handle_summarize(session_id, fields)
 
     def _handle_new_message(self, session_id: str, fields: Dict[str, Any]) -> None:
         message_id = fields.get("message_id") or str(uuid.uuid4())
@@ -517,12 +575,71 @@ class EventWorker:
             }
             self.store.append_recent(session_id, agent_message)
 
+    def _handle_summarize(self, session_id: str, fields: Dict[str, Any]) -> None:
+        """Handle summarization when an agent message is received."""
+        summarizer_id = self.store.settings.summarizer_id
+        summarizer_name = self.store.settings.summarizer_name
+
+        with self.store.session_lock(session_id) as locked:
+            if not locked:
+                return
+
+            message_id = fields.get("messageId") or str(uuid.uuid4())
+            summary_message_id = str(uuid.uuid4())
+
+            # Signal that summarizer is working
+            self.store.publish_event(
+                session_id,
+                {
+                    "type": "agent:working",
+                    "messageId": summary_message_id,
+                    "sessionId": session_id,
+                    "inReplyTo": message_id,
+                    "agentId": summarizer_id,
+                    "agentName": summarizer_name,
+                },
+            )
+
+            # Get conversation history and summarize
+            history = self.store.recent_messages(session_id)
+            summary_text = self.summarizer.summarize(history)
+
+            # Check if summarization failed
+            if not summary_text:
+                app.logger.debug("Summarizer returned empty response for session %s", session_id)
+                return
+
+            # Send summary as agent message
+            summary_payload = {
+                "type": "agent:msg",
+                "messageId": summary_message_id,
+                "sessionId": session_id,
+                "author": f"agent:{summarizer_id}",
+                "agentId": summarizer_id,
+                "agentName": summarizer_name,
+                "text": summary_text.strip(),
+                "inReplyTo": message_id,
+            }
+            self.store.publish_event(session_id, summary_payload)
+
+            # Store in recent messages
+            summary_message = {
+                "messageId": summary_message_id,
+                "sessionId": session_id,
+                "author": summary_payload["author"],
+                "role": "agent",
+                "agentId": summarizer_id,
+                "text": summary_text.strip(),
+                "timestamp": time.time(),
+            }
+            self.store.append_recent(session_id, summary_message)
 
 settings = Settings()
 redis_client = connect_redis(settings.redis_url)
 store = SessionStore(redis_client, settings)
 llm = PrimaryLLM(settings)
-worker = EventWorker(store, llm)
+summarizer = SummarizerLLM(settings)
+worker = EventWorker(store, llm, summarizer)
 
 app = Flask(__name__)
 CORS(app)
