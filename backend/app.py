@@ -576,6 +576,19 @@ class EventWorker:
                 "text": full_text.strip(),
                 "inReplyTo": message_id,
             }
+
+            # Store in recent messages BEFORE enqueuing event to avoid race condition
+            agent_message = {
+                "messageId": agent_message_id,
+                "sessionId": session_id,
+                "author": done_payload["author"],
+                "role": "agent",
+                "agentId": self.store.settings.primary_agent_id,
+                "text": full_text.strip(),
+                "timestamp": time.time(),
+            }
+            self.store.append_recent(session_id, agent_message)
+
             # Enqueue to stream so worker can detect and trigger summarizer
             self.store.enqueue_event(
                 session_id,
@@ -589,18 +602,6 @@ class EventWorker:
             )
             # Publish to UI clients
             self.store.publish_event(session_id, done_payload)
-
-            # Store in recent messages
-            agent_message = {
-                "messageId": agent_message_id,
-                "sessionId": session_id,
-                "author": done_payload["author"],
-                "role": "agent",
-                "agentId": self.store.settings.primary_agent_id,
-                "text": full_text.strip(),
-                "timestamp": time.time(),
-            }
-            self.store.append_recent(session_id, agent_message)
 
     def _handle_summarize(self, session_id: str, fields: Dict[str, Any]) -> None:
         """Handle summarization when an agent message is received."""
