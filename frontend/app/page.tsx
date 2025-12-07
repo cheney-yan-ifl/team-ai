@@ -375,6 +375,12 @@ function PageLayout({
     }
 
     if (type === 'agent:msg') {
+      const agentIdLower = (payload.agentId || '').toLowerCase();
+      if (agentIdLower === 'summarizer') {
+        setLatestSummary(payload.text || '');
+        return;
+      }
+
       const id = messageId || payload.inReplyTo || payload.in_reply_to || Date.now().toString();
       setPendingMessageIds((prev) => {
         const next = new Set(prev);
@@ -401,12 +407,6 @@ function PageLayout({
         }
         return [...prev, nextMessage];
       });
-
-      // Extract summary if this is from the summarizer agent
-      const agentIdLower = (payload.agentId || '').toLowerCase();
-      if (agentIdLower === 'summarizer') {
-        setLatestSummary(payload.text || '');
-      }
 
       return;
     }
