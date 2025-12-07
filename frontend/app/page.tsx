@@ -126,7 +126,7 @@ export default function HomePage() {
         next[agent.agentId] = {
           ...existing,
           name: agent.name,
-          role: agent.role === 'primary' ? 'Primary' : 'Observer',
+          role: agent.role,
           model: agent.model,
           flash: existing.flash,
           working: existing.working,
@@ -422,9 +422,9 @@ function PageLayout({
       }
 
       const nextName = payload.agentName || rawAgent;
-      const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'Primary' : 'Agent');
+      const nextRole = payload.role || payload.agentRole || (rawAgent === 'primary' ? 'primary' : 'observer');
       setAgentStates((prev) => {
-        const existing = prev[rawAgent] || { name: rawAgent, role: 'Agent', working: false, flash: false };
+        const existing = prev[rawAgent] || { name: rawAgent, role: 'observer', working: false, flash: false };
         return {
           ...prev,
           [rawAgent]: {
@@ -721,9 +721,6 @@ function PageLayout({
               <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
                 {chatTitle}
               </div>
-              <p style={{ color: colors.muted, margin: 0 }}>
-                Connected to backend. Messages are sent to Redis for persistence.
-              </p>
             </div>
           </div>
 
@@ -864,7 +861,7 @@ function PageLayout({
               fontSize: '14px', 
               marginBottom: '12px',
               color: colors.text
-            }}>Agent Status</div>
+            }}>Participant Agents</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {agents.map((agent) => {
                 const state = agentStates[agent.agentId] || { name: agent.name, role: agent.role, working: false, flash: false };
@@ -902,8 +899,16 @@ function PageLayout({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {state.working && <span role="img" aria-label="speaking" style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>🗣️</span>}
                         <span style={{ fontWeight: 'bold' }}>{state.name}</span>
+                        <span style={{
+                          background: state.role === 'primary' ? colors.primary : colors.muted,
+                          color: '#ffffff',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          fontWeight: 'bold'
+                        }}>{state.role === 'primary' ? 'Primary' : 'Observer'}</span>
                       </div>
-                      <span style={{ fontSize: '12px', color: colors.muted }}>{state.role === 'primary' ? 'Primary' : 'Observer'} · {agent.model}</span>
+                      <span style={{ fontSize: '12px', color: colors.muted }}>{agent.model}</span>
                     </div>
                   </li>
                 );
